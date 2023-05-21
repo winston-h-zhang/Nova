@@ -36,10 +36,12 @@ use constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_WITHOUT_IO_FOR_CRHF, NUM_HASH_
 use core::marker::PhantomData;
 use errors::NovaError;
 use ff::Field;
+use flate2::{write::ZlibEncoder, Compression};
 use gadgets::utils::scalar_as_base;
 use nifs::NIFS;
 use r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness};
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use traits::{
   circuit::StepCircuit,
   commitment::{CommitmentEngineTrait, CommitmentTrait},
@@ -69,6 +71,7 @@ where
   r1cs_shape_secondary: R1CSShape<G2>,
   augmented_circuit_params_primary: NovaAugmentedCircuitParams,
   augmented_circuit_params_secondary: NovaAugmentedCircuitParams,
+  digest: G1::Scalar, // digest of everything else with this field set to G1::Scalar::ZERO
   _p_c1: PhantomData<C1>,
   _p_c2: PhantomData<C2>,
 }
@@ -119,7 +122,7 @@ where
     let _ = circuit_secondary.synthesize(&mut cs);
     let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape();
 
-    Self {
+    let mut pp = Self {
       F_arity_primary,
       F_arity_secondary,
       ro_consts_primary,
@@ -132,9 +135,15 @@ where
       r1cs_shape_secondary,
       augmented_circuit_params_primary,
       augmented_circuit_params_secondary,
+      digest: G1::Scalar::ZERO,
       _p_c1: Default::default(),
       _p_c2: Default::default(),
-    }
+    };
+
+    // set the digest in pp
+    pp.digest = compute_digest::<G1, PublicParams<G1, G2, C1, C2>>(&pp);
+
+    pp
   }
 
   /// Returns the number of constraints in the primary and secondary circuits
@@ -166,8 +175,6 @@ where
 {
   r_W_primary: RelaxedR1CSWitness<G1>,
   r_U_primary: RelaxedR1CSInstance<G1>,
-  l_w_primary: R1CSWitness<G1>,
-  l_u_primary: R1CSInstance<G1>,
   r_W_secondary: RelaxedR1CSWitness<G2>,
   r_U_secondary: RelaxedR1CSInstance<G2>,
   l_w_secondary: R1CSWitness<G2>,
@@ -205,7 +212,7 @@ where
         // base case for the primary
         let mut cs_primary: SatisfyingAssignment<G1> = SatisfyingAssignment::new();
         let inputs_primary: NovaAugmentedCircuitInputs<G2> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_secondary.get_digest(),
+          scalar_as_base::<G1>(pp.digest),
           G1::Scalar::ZERO,
           z0_primary.clone(),
           None,
@@ -228,7 +235,7 @@ where
         // base case for the secondary
         let mut cs_secondary: SatisfyingAssignment<G2> = SatisfyingAssignment::new();
         let inputs_secondary: NovaAugmentedCircuitInputs<G1> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_primary.get_digest(),
+          pp.digest,
           G2::Scalar::ZERO,
           z0_secondary.clone(),
           None,
@@ -276,8 +283,6 @@ where
         Ok(Self {
           r_W_primary,
           r_U_primary,
-          l_w_primary,
-          l_u_primary,
           r_W_secondary,
           r_U_secondary,
           l_w_secondary,
@@ -294,6 +299,7 @@ where
         let (nifs_secondary, (r_U_secondary, r_W_secondary)) = NIFS::prove(
           &pp.ck_secondary,
           &pp.ro_consts_secondary,
+          &scalar_as_base::<G1>(pp.digest),
           &pp.r1cs_shape_secondary,
           &r_snark.r_U_secondary,
           &r_snark.r_W_secondary,
@@ -303,7 +309,7 @@ where
 
         let mut cs_primary: SatisfyingAssignment<G1> = SatisfyingAssignment::new();
         let inputs_primary: NovaAugmentedCircuitInputs<G2> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_secondary.get_digest(),
+          scalar_as_base::<G1>(pp.digest),
           G1::Scalar::from(r_snark.i as u64),
           z0_primary,
           Some(r_snark.zi_primary.clone()),
@@ -328,6 +334,7 @@ where
         let (nifs_primary, (r_U_primary, r_W_primary)) = NIFS::prove(
           &pp.ck_primary,
           &pp.ro_consts_primary,
+          &pp.digest,
           &pp.r1cs_shape_primary,
           &r_snark.r_U_primary,
           &r_snark.r_W_primary,
@@ -337,12 +344,12 @@ where
 
         let mut cs_secondary: SatisfyingAssignment<G2> = SatisfyingAssignment::new();
         let inputs_secondary: NovaAugmentedCircuitInputs<G1> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_primary.get_digest(),
+          pp.digest,
           G2::Scalar::from(r_snark.i as u64),
           z0_secondary,
           Some(r_snark.zi_secondary.clone()),
           Some(r_snark.r_U_primary.clone()),
-          Some(l_u_primary.clone()),
+          Some(l_u_primary),
           Some(Commitment::<G1>::decompress(&nifs_primary.comm_T)?),
         );
 
@@ -365,8 +372,6 @@ where
         Ok(Self {
           r_W_primary,
           r_U_primary,
-          l_w_primary,
-          l_u_primary,
           r_W_secondary,
           r_U_secondary,
           l_w_secondary,
@@ -400,8 +405,7 @@ where
     }
 
     // check if the (relaxed) R1CS instances have two public outputs
-    if self.l_u_primary.X.len() != 2
-      || self.l_u_secondary.X.len() != 2
+    if self.l_u_secondary.X.len() != 2
       || self.r_U_primary.X.len() != 2
       || self.r_U_secondary.X.len() != 2
     {
@@ -414,7 +418,7 @@ where
         pp.ro_consts_secondary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * pp.F_arity_primary,
       );
-      hasher.absorb(scalar_as_base::<G2>(pp.r1cs_shape_secondary.get_digest()));
+      hasher.absorb(pp.digest);
       hasher.absorb(G1::Scalar::from(num_steps as u64));
       for e in &z0_primary {
         hasher.absorb(*e);
@@ -428,7 +432,7 @@ where
         pp.ro_consts_primary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * pp.F_arity_secondary,
       );
-      hasher2.absorb(scalar_as_base::<G1>(pp.r1cs_shape_primary.get_digest()));
+      hasher2.absorb(scalar_as_base::<G1>(pp.digest));
       hasher2.absorb(G2::Scalar::from(num_steps as u64));
       for e in &z0_secondary {
         hasher2.absorb(*e);
@@ -444,28 +448,17 @@ where
       )
     };
 
-    if hash_primary != scalar_as_base::<G1>(self.l_u_primary.X[1])
+    if hash_primary != self.l_u_secondary.X[0]
       || hash_secondary != scalar_as_base::<G2>(self.l_u_secondary.X[1])
     {
       return Err(NovaError::ProofVerifyError);
     }
 
     // check the satisfiability of the provided instances
-    let ((res_r_primary, res_l_primary), (res_r_secondary, res_l_secondary)) = rayon::join(
+    let (res_r_primary, (res_r_secondary, res_l_secondary)) = rayon::join(
       || {
-        rayon::join(
-          || {
-            pp.r1cs_shape_primary.is_sat_relaxed(
-              &pp.ck_primary,
-              &self.r_U_primary,
-              &self.r_W_primary,
-            )
-          },
-          || {
-            pp.r1cs_shape_primary
-              .is_sat(&pp.ck_primary, &self.l_u_primary, &self.l_w_primary)
-          },
-        )
+        pp.r1cs_shape_primary
+          .is_sat_relaxed(&pp.ck_primary, &self.r_U_primary, &self.r_W_primary)
       },
       || {
         rayon::join(
@@ -489,7 +482,6 @@ where
 
     // check the returned res objects
     res_r_primary?;
-    res_l_primary?;
     res_r_secondary?;
     res_l_secondary?;
 
@@ -531,8 +523,7 @@ where
   F_arity_secondary: usize,
   ro_consts_primary: ROConstants<G1>,
   ro_consts_secondary: ROConstants<G2>,
-  r1cs_shape_primary_digest: G1::Scalar,
-  r1cs_shape_secondary_digest: G2::Scalar,
+  digest: G1::Scalar,
   vk_primary: S1::VerifierKey,
   vk_secondary: S2::VerifierKey,
   _p_c1: PhantomData<C1>,
@@ -552,9 +543,7 @@ where
   S2: RelaxedR1CSSNARKTrait<G2>,
 {
   r_U_primary: RelaxedR1CSInstance<G1>,
-  l_u_primary: R1CSInstance<G1>,
-  nifs_primary: NIFS<G1>,
-  f_W_snark_primary: S1,
+  r_W_snark_primary: S1,
 
   r_U_secondary: RelaxedR1CSInstance<G2>,
   l_u_secondary: R1CSInstance<G2>,
@@ -602,8 +591,7 @@ where
       F_arity_secondary: pp.F_arity_secondary,
       ro_consts_primary: pp.ro_consts_primary.clone(),
       ro_consts_secondary: pp.ro_consts_secondary.clone(),
-      r1cs_shape_primary_digest: pp.r1cs_shape_primary.get_digest(),
-      r1cs_shape_secondary_digest: pp.r1cs_shape_secondary.get_digest(),
+      digest: pp.digest,
       vk_primary,
       vk_secondary,
       _p_c1: Default::default(),
@@ -619,39 +607,30 @@ where
     pk: &ProverKey<G1, G2, C1, C2, S1, S2>,
     recursive_snark: &RecursiveSNARK<G1, G2, C1, C2>,
   ) -> Result<Self, NovaError> {
-    let (res_primary, res_secondary) = rayon::join(
-      // fold the primary circuit's instance
-      || {
-        NIFS::prove(
-          &pp.ck_primary,
-          &pp.ro_consts_primary,
-          &pp.r1cs_shape_primary,
-          &recursive_snark.r_U_primary,
-          &recursive_snark.r_W_primary,
-          &recursive_snark.l_u_primary,
-          &recursive_snark.l_w_primary,
-        )
-      },
-      || {
-        // fold the secondary circuit's instance
-        NIFS::prove(
-          &pp.ck_secondary,
-          &pp.ro_consts_secondary,
-          &pp.r1cs_shape_secondary,
-          &recursive_snark.r_U_secondary,
-          &recursive_snark.r_W_secondary,
-          &recursive_snark.l_u_secondary,
-          &recursive_snark.l_w_secondary,
-        )
-      },
+    // fold the secondary circuit's instance
+    let res_secondary = NIFS::prove(
+      &pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      &scalar_as_base::<G1>(pp.digest),
+      &pp.r1cs_shape_secondary,
+      &recursive_snark.r_U_secondary,
+      &recursive_snark.r_W_secondary,
+      &recursive_snark.l_u_secondary,
+      &recursive_snark.l_w_secondary,
     );
 
-    let (nifs_primary, (f_U_primary, f_W_primary)) = res_primary?;
     let (nifs_secondary, (f_U_secondary, f_W_secondary)) = res_secondary?;
 
     // create SNARKs proving the knowledge of f_W_primary and f_W_secondary
-    let (f_W_snark_primary, f_W_snark_secondary) = rayon::join(
-      || S1::prove(&pp.ck_primary, &pk.pk_primary, &f_U_primary, &f_W_primary),
+    let (r_W_snark_primary, f_W_snark_secondary) = rayon::join(
+      || {
+        S1::prove(
+          &pp.ck_primary,
+          &pk.pk_primary,
+          &recursive_snark.r_U_primary,
+          &recursive_snark.r_W_primary,
+        )
+      },
       || {
         S2::prove(
           &pp.ck_secondary,
@@ -664,9 +643,7 @@ where
 
     Ok(Self {
       r_U_primary: recursive_snark.r_U_primary.clone(),
-      l_u_primary: recursive_snark.l_u_primary.clone(),
-      nifs_primary,
-      f_W_snark_primary: f_W_snark_primary?,
+      r_W_snark_primary: r_W_snark_primary?,
 
       r_U_secondary: recursive_snark.r_U_secondary.clone(),
       l_u_secondary: recursive_snark.l_u_secondary.clone(),
@@ -695,8 +672,7 @@ where
     }
 
     // check if the (relaxed) R1CS instances have two public outputs
-    if self.l_u_primary.X.len() != 2
-      || self.l_u_secondary.X.len() != 2
+    if self.l_u_secondary.X.len() != 2
       || self.r_U_primary.X.len() != 2
       || self.r_U_secondary.X.len() != 2
     {
@@ -709,7 +685,7 @@ where
         vk.ro_consts_secondary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * vk.F_arity_primary,
       );
-      hasher.absorb(scalar_as_base::<G2>(vk.r1cs_shape_secondary_digest));
+      hasher.absorb(vk.digest);
       hasher.absorb(G1::Scalar::from(num_steps as u64));
       for e in z0_primary {
         hasher.absorb(e);
@@ -723,7 +699,7 @@ where
         vk.ro_consts_primary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * vk.F_arity_secondary,
       );
-      hasher2.absorb(scalar_as_base::<G1>(vk.r1cs_shape_primary_digest));
+      hasher2.absorb(scalar_as_base::<G1>(vk.digest));
       hasher2.absorb(G2::Scalar::from(num_steps as u64));
       for e in z0_secondary {
         hasher2.absorb(e);
@@ -739,29 +715,27 @@ where
       )
     };
 
-    if hash_primary != scalar_as_base::<G1>(self.l_u_primary.X[1])
+    if hash_primary != self.l_u_secondary.X[0]
       || hash_secondary != scalar_as_base::<G2>(self.l_u_secondary.X[1])
     {
       return Err(NovaError::ProofVerifyError);
     }
 
     // fold the running instance and last instance to get a folded instance
-    let f_U_primary = self.nifs_primary.verify(
-      &vk.ro_consts_primary,
-      &vk.r1cs_shape_primary_digest,
-      &self.r_U_primary,
-      &self.l_u_primary,
-    )?;
     let f_U_secondary = self.nifs_secondary.verify(
       &vk.ro_consts_secondary,
-      &vk.r1cs_shape_secondary_digest,
+      &scalar_as_base::<G1>(vk.digest),
       &self.r_U_secondary,
       &self.l_u_secondary,
     )?;
 
     // check the satisfiability of the folded instances using SNARKs proving the knowledge of their satisfying witnesses
     let (res_primary, res_secondary) = rayon::join(
-      || self.f_W_snark_primary.verify(&vk.vk_primary, &f_U_primary),
+      || {
+        self
+          .r_W_snark_primary
+          .verify(&vk.vk_primary, &self.r_U_primary)
+      },
       || {
         self
           .f_W_snark_secondary
@@ -780,6 +754,36 @@ type CommitmentKey<G> = <<G as traits::Group>::CE as CommitmentEngineTrait<G>>::
 type Commitment<G> = <<G as Group>::CE as CommitmentEngineTrait<G>>::Commitment;
 type CompressedCommitment<G> = <<<G as Group>::CE as CommitmentEngineTrait<G>>::Commitment as CommitmentTrait<G>>::CompressedCommitment;
 type CE<G> = <G as Group>::CE;
+
+fn compute_digest<G: Group, T: Serialize>(o: &T) -> G::Scalar {
+  // obtain a vector of bytes representing public parameters
+  let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+  bincode::serialize_into(&mut encoder, o).unwrap();
+  let pp_bytes = encoder.finish().unwrap();
+
+  // convert pp_bytes into a short digest
+  let mut hasher = Sha3_256::new();
+  hasher.input(&pp_bytes);
+  let digest = hasher.result();
+
+  // truncate the digest to NUM_HASH_BITS bits
+  let bv = (0..NUM_HASH_BITS).map(|i| {
+    let (byte_pos, bit_pos) = (i / 8, i % 8);
+    let bit = (digest[byte_pos] >> bit_pos) & 1;
+    bit == 1
+  });
+
+  // turn the bit vector into a scalar
+  let mut digest = G::Scalar::ZERO;
+  let mut coeff = G::Scalar::ONE;
+  for bit in bv {
+    if bit {
+      digest += coeff;
+    }
+    coeff += coeff;
+  }
+  digest
+}
 
 #[cfg(test)]
 mod tests {
