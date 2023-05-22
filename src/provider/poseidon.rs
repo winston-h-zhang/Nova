@@ -8,6 +8,7 @@ use bellperson::{
   ConstraintSystem, SynthesisError,
 };
 use core::marker::PhantomData;
+// use std::fmt;
 use ff::{PrimeField, PrimeFieldBits};
 use generic_array::typenum::U24;
 use neptune::{
@@ -23,8 +24,49 @@ use neptune::{
 use serde::{Deserialize, Serialize};
 
 /// All Poseidon Constants that are used in Nova
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(PoseidonConstants<Scalar, U24>);
+
+// struct PoseidonConstantsCircuitVisitor<Scalar: PrimeField> {
+//   _f: PhantomData<Scalar>,
+// }
+
+// impl<'de, Scalar: PrimeField + Deserialize<'de>> Visitor<'de> for PoseidonConstantsCircuitVisitor<Scalar> {
+//     type Value = PoseidonConstantsCircuit<Scalar>;
+
+//     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         formatter.write_str("struct PoseidonConstantsCircuit")
+//     }
+
+//     fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
+//     where
+//         V: de::SeqAccess<'de>,
+//     {
+//         let constants = seq.next_element()?
+//             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+//         Ok(PoseidonConstantsCircuit(constants))
+//     }
+// }
+
+// impl<'de, Scalar: PrimeField + Deserialize<'de>> Deserialize<'de> for PoseidonConstantsCircuit<Scalar> {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         deserializer.deserialize_tuple(1, PoseidonConstantsCircuitVisitor { _f: PhantomData } )
+//     }
+// }
+
+// impl<Scalar: PrimeField + Serialize> Serialize for PoseidonConstantsCircuit<Scalar> {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         let mut seq = serializer.serialize_tuple(1)?;
+//         seq.serialize_element(&self.0)?;
+//         seq.end()
+//     }
+// }
 
 impl<Scalar> ROConstantsTrait<Scalar> for PoseidonConstantsCircuit<Scalar>
 where
@@ -234,5 +276,19 @@ mod tests {
     let num2_bits = ro_gadget.squeeze(&mut cs, NUM_CHALLENGE_BITS).unwrap();
     let num2 = le_bits_to_num(&mut cs, num2_bits).unwrap();
     assert_eq!(num.to_repr(), num2.get_value().unwrap().to_repr());
+  }
+
+  #[test]
+  fn test_serde_roundtrip() {
+    let constants = PoseidonConstants::<S, U24>::new();
+    assert!(constants == bincode::deserialize(&bincode::serialize(&constants).unwrap()).unwrap())
+  }
+
+  #[test]
+  fn test_serde_roundtrip_what() {
+    let constants = PoseidonConstantsCircuit::<S>::new();
+    let bytes = bincode::serialize(&constants).unwrap();
+    let constants_res = bincode::deserialize::<PoseidonConstantsCircuit<S>>(&bytes).unwrap();
+    assert!(constants == constants_res) // fails?!
   }
 }

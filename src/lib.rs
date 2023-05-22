@@ -50,7 +50,7 @@ use traits::{
 };
 
 /// A type that holds public parameters of Nova
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct PublicParams<G1, G2, C1, C2>
 where
@@ -799,7 +799,7 @@ mod tests {
   use ff::PrimeField;
   use traits::circuit::TrivialTestCircuit;
 
-  #[derive(Clone, Debug, Default)]
+  #[derive(Clone, PartialEq, Debug, Default)]
   struct CubicCircuit<F: PrimeField> {
     _p: PhantomData<F>,
   }
@@ -1302,4 +1302,16 @@ mod tests {
     assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::ONE]);
     assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(5u64)]);
   }
+
+  // #[test]
+  // fn test_public_params_roundtrip_serde() {
+  //   // produce public parameters
+  //   // let pp = PublicParams::<
+  //   //   G1,
+  //   //   G2,
+  //   //   TrivialTestCircuit<<G1 as Group>::Scalar>,
+  //   //   CubicCircuit<<G2 as Group>::Scalar>,
+  //   // >::setup(TrivialTestCircuit::default(), CubicCircuit::default());
+  //   assert!(constants == bincode::deserialize(&bincode::serialize(&constants).unwrap()).unwrap());
+  // }
 }
