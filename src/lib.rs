@@ -38,10 +38,12 @@ use constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_WITHOUT_IO_FOR_CRHF, NUM_HASH_
 use core::marker::PhantomData;
 use errors::NovaError;
 use ff::Field;
+use flate2::{write::ZlibEncoder, Compression};
 use gadgets::utils::scalar_as_base;
 use nifs::NIFS;
 use r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness};
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use traits::{
   circuit::StepCircuit,
   commitment::{CommitmentEngineTrait, CommitmentTrait},
@@ -71,6 +73,7 @@ where
   r1cs_shape_secondary: R1CSShape<G2>,
   augmented_circuit_params_primary: NovaAugmentedCircuitParams,
   augmented_circuit_params_secondary: NovaAugmentedCircuitParams,
+  digest: G1::Scalar, // digest of everything else with this field set to G1::Scalar::ZERO
   _p_c1: PhantomData<C1>,
   _p_c2: PhantomData<C2>,
 }
@@ -193,7 +196,7 @@ where
     let _ = circuit_secondary.synthesize(&mut cs);
     let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape();
 
-    Self {
+    let mut pp = Self {
       F_arity_primary,
       F_arity_secondary,
       ro_consts_primary,
@@ -206,9 +209,15 @@ where
       r1cs_shape_secondary,
       augmented_circuit_params_primary,
       augmented_circuit_params_secondary,
+      digest: G1::Scalar::ZERO,
       _p_c1: Default::default(),
       _p_c2: Default::default(),
-    }
+    };
+
+    // set the digest in pp
+    pp.digest = compute_digest::<G1, PublicParams<G1, G2, C1, C2>>(&pp);
+
+    pp
   }
 
   /// Returns the number of constraints in the primary and secondary circuits
@@ -240,8 +249,6 @@ where
 {
   r_W_primary: RelaxedR1CSWitness<G1>,
   r_U_primary: RelaxedR1CSInstance<G1>,
-  l_w_primary: R1CSWitness<G1>,
-  l_u_primary: R1CSInstance<G1>,
   r_W_secondary: RelaxedR1CSWitness<G2>,
   r_U_secondary: RelaxedR1CSInstance<G2>,
   l_w_secondary: R1CSWitness<G2>,
@@ -279,8 +286,8 @@ where
         // base case for the primary
         let mut cs_primary: SatisfyingAssignment<G1> = SatisfyingAssignment::new();
         let inputs_primary: NovaAugmentedCircuitInputs<G2> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_secondary.get_digest(),
-          G1::Scalar::zero(),
+          scalar_as_base::<G1>(pp.digest),
+          G1::Scalar::ZERO,
           z0_primary.clone(),
           None,
           None,
@@ -302,8 +309,8 @@ where
         // base case for the secondary
         let mut cs_secondary: SatisfyingAssignment<G2> = SatisfyingAssignment::new();
         let inputs_secondary: NovaAugmentedCircuitInputs<G1> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_primary.get_digest(),
-          G2::Scalar::zero(),
+          pp.digest,
+          G2::Scalar::ZERO,
           z0_secondary.clone(),
           None,
           None,
@@ -350,8 +357,6 @@ where
         Ok(Self {
           r_W_primary,
           r_U_primary,
-          l_w_primary,
-          l_u_primary,
           r_W_secondary,
           r_U_secondary,
           l_w_secondary,
@@ -368,6 +373,7 @@ where
         let (nifs_secondary, (r_U_secondary, r_W_secondary)) = NIFS::prove(
           &pp.ck_secondary,
           &pp.ro_consts_secondary,
+          &scalar_as_base::<G1>(pp.digest),
           &pp.r1cs_shape_secondary,
           &r_snark.r_U_secondary,
           &r_snark.r_W_secondary,
@@ -377,7 +383,7 @@ where
 
         let mut cs_primary: SatisfyingAssignment<G1> = SatisfyingAssignment::new();
         let inputs_primary: NovaAugmentedCircuitInputs<G2> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_secondary.get_digest(),
+          scalar_as_base::<G1>(pp.digest),
           G1::Scalar::from(r_snark.i as u64),
           z0_primary,
           Some(r_snark.zi_primary.clone()),
@@ -402,6 +408,7 @@ where
         let (nifs_primary, (r_U_primary, r_W_primary)) = NIFS::prove(
           &pp.ck_primary,
           &pp.ro_consts_primary,
+          &pp.digest,
           &pp.r1cs_shape_primary,
           &r_snark.r_U_primary,
           &r_snark.r_W_primary,
@@ -411,12 +418,12 @@ where
 
         let mut cs_secondary: SatisfyingAssignment<G2> = SatisfyingAssignment::new();
         let inputs_secondary: NovaAugmentedCircuitInputs<G1> = NovaAugmentedCircuitInputs::new(
-          pp.r1cs_shape_primary.get_digest(),
+          pp.digest,
           G2::Scalar::from(r_snark.i as u64),
           z0_secondary,
           Some(r_snark.zi_secondary.clone()),
           Some(r_snark.r_U_primary.clone()),
-          Some(l_u_primary.clone()),
+          Some(l_u_primary),
           Some(Commitment::<G1>::decompress(&nifs_primary.comm_T)?),
         );
 
@@ -439,8 +446,6 @@ where
         Ok(Self {
           r_W_primary,
           r_U_primary,
-          l_w_primary,
-          l_u_primary,
           r_W_secondary,
           r_U_secondary,
           l_w_secondary,
@@ -474,8 +479,7 @@ where
     }
 
     // check if the (relaxed) R1CS instances have two public outputs
-    if self.l_u_primary.X.len() != 2
-      || self.l_u_secondary.X.len() != 2
+    if self.l_u_secondary.X.len() != 2
       || self.r_U_primary.X.len() != 2
       || self.r_U_secondary.X.len() != 2
     {
@@ -488,7 +492,7 @@ where
         pp.ro_consts_secondary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * pp.F_arity_primary,
       );
-      hasher.absorb(scalar_as_base::<G2>(pp.r1cs_shape_secondary.get_digest()));
+      hasher.absorb(pp.digest);
       hasher.absorb(G1::Scalar::from(num_steps as u64));
       for e in &z0_primary {
         hasher.absorb(*e);
@@ -502,7 +506,7 @@ where
         pp.ro_consts_primary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * pp.F_arity_secondary,
       );
-      hasher2.absorb(scalar_as_base::<G1>(pp.r1cs_shape_primary.get_digest()));
+      hasher2.absorb(scalar_as_base::<G1>(pp.digest));
       hasher2.absorb(G2::Scalar::from(num_steps as u64));
       for e in &z0_secondary {
         hasher2.absorb(*e);
@@ -518,28 +522,17 @@ where
       )
     };
 
-    if hash_primary != scalar_as_base::<G1>(self.l_u_primary.X[1])
+    if hash_primary != self.l_u_secondary.X[0]
       || hash_secondary != scalar_as_base::<G2>(self.l_u_secondary.X[1])
     {
       return Err(NovaError::ProofVerifyError);
     }
 
     // check the satisfiability of the provided instances
-    let ((res_r_primary, res_l_primary), (res_r_secondary, res_l_secondary)) = rayon::join(
+    let (res_r_primary, (res_r_secondary, res_l_secondary)) = rayon::join(
       || {
-        rayon::join(
-          || {
-            pp.r1cs_shape_primary.is_sat_relaxed(
-              &pp.ck_primary,
-              &self.r_U_primary,
-              &self.r_W_primary,
-            )
-          },
-          || {
-            pp.r1cs_shape_primary
-              .is_sat(&pp.ck_primary, &self.l_u_primary, &self.l_w_primary)
-          },
-        )
+        pp.r1cs_shape_primary
+          .is_sat_relaxed(&pp.ck_primary, &self.r_U_primary, &self.r_W_primary)
       },
       || {
         rayon::join(
@@ -563,7 +556,6 @@ where
 
     // check the returned res objects
     res_r_primary?;
-    res_l_primary?;
     res_r_secondary?;
     res_l_secondary?;
 
@@ -636,8 +628,7 @@ where
   F_arity_secondary: usize,
   ro_consts_primary: ROConstants<G1>,
   ro_consts_secondary: ROConstants<G2>,
-  r1cs_shape_primary_digest: G1::Scalar,
-  r1cs_shape_secondary_digest: G2::Scalar,
+  digest: G1::Scalar,
   vk_primary: S1::VerifierKey,
   vk_secondary: S2::VerifierKey,
   _p_c1: PhantomData<C1>,
@@ -704,9 +695,7 @@ where
   S2: RelaxedR1CSSNARKTrait<G2>,
 {
   r_U_primary: RelaxedR1CSInstance<G1>,
-  l_u_primary: R1CSInstance<G1>,
-  nifs_primary: NIFS<G1>,
-  f_W_snark_primary: S1,
+  r_W_snark_primary: S1,
 
   r_U_secondary: RelaxedR1CSInstance<G2>,
   l_u_secondary: R1CSInstance<G2>,
@@ -754,8 +743,7 @@ where
       F_arity_secondary: pp.F_arity_secondary,
       ro_consts_primary: pp.ro_consts_primary.clone(),
       ro_consts_secondary: pp.ro_consts_secondary.clone(),
-      r1cs_shape_primary_digest: pp.r1cs_shape_primary.get_digest(),
-      r1cs_shape_secondary_digest: pp.r1cs_shape_secondary.get_digest(),
+      digest: pp.digest,
       vk_primary,
       vk_secondary,
       _p_c1: Default::default(),
@@ -771,39 +759,30 @@ where
     pk: &ProverKey<G1, G2, C1, C2, S1, S2>,
     recursive_snark: &RecursiveSNARK<G1, G2, C1, C2>,
   ) -> Result<Self, NovaError> {
-    let (res_primary, res_secondary) = rayon::join(
-      // fold the primary circuit's instance
-      || {
-        NIFS::prove(
-          &pp.ck_primary,
-          &pp.ro_consts_primary,
-          &pp.r1cs_shape_primary,
-          &recursive_snark.r_U_primary,
-          &recursive_snark.r_W_primary,
-          &recursive_snark.l_u_primary,
-          &recursive_snark.l_w_primary,
-        )
-      },
-      || {
-        // fold the secondary circuit's instance
-        NIFS::prove(
-          &pp.ck_secondary,
-          &pp.ro_consts_secondary,
-          &pp.r1cs_shape_secondary,
-          &recursive_snark.r_U_secondary,
-          &recursive_snark.r_W_secondary,
-          &recursive_snark.l_u_secondary,
-          &recursive_snark.l_w_secondary,
-        )
-      },
+    // fold the secondary circuit's instance
+    let res_secondary = NIFS::prove(
+      &pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      &scalar_as_base::<G1>(pp.digest),
+      &pp.r1cs_shape_secondary,
+      &recursive_snark.r_U_secondary,
+      &recursive_snark.r_W_secondary,
+      &recursive_snark.l_u_secondary,
+      &recursive_snark.l_w_secondary,
     );
 
-    let (nifs_primary, (f_U_primary, f_W_primary)) = res_primary?;
     let (nifs_secondary, (f_U_secondary, f_W_secondary)) = res_secondary?;
 
     // create SNARKs proving the knowledge of f_W_primary and f_W_secondary
-    let (f_W_snark_primary, f_W_snark_secondary) = rayon::join(
-      || S1::prove(&pp.ck_primary, &pk.pk_primary, &f_U_primary, &f_W_primary),
+    let (r_W_snark_primary, f_W_snark_secondary) = rayon::join(
+      || {
+        S1::prove(
+          &pp.ck_primary,
+          &pk.pk_primary,
+          &recursive_snark.r_U_primary,
+          &recursive_snark.r_W_primary,
+        )
+      },
       || {
         S2::prove(
           &pp.ck_secondary,
@@ -816,9 +795,7 @@ where
 
     Ok(Self {
       r_U_primary: recursive_snark.r_U_primary.clone(),
-      l_u_primary: recursive_snark.l_u_primary.clone(),
-      nifs_primary,
-      f_W_snark_primary: f_W_snark_primary?,
+      r_W_snark_primary: r_W_snark_primary?,
 
       r_U_secondary: recursive_snark.r_U_secondary.clone(),
       l_u_secondary: recursive_snark.l_u_secondary.clone(),
@@ -847,8 +824,7 @@ where
     }
 
     // check if the (relaxed) R1CS instances have two public outputs
-    if self.l_u_primary.X.len() != 2
-      || self.l_u_secondary.X.len() != 2
+    if self.l_u_secondary.X.len() != 2
       || self.r_U_primary.X.len() != 2
       || self.r_U_secondary.X.len() != 2
     {
@@ -861,7 +837,7 @@ where
         vk.ro_consts_secondary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * vk.F_arity_primary,
       );
-      hasher.absorb(scalar_as_base::<G2>(vk.r1cs_shape_secondary_digest));
+      hasher.absorb(vk.digest);
       hasher.absorb(G1::Scalar::from(num_steps as u64));
       for e in z0_primary {
         hasher.absorb(e);
@@ -875,7 +851,7 @@ where
         vk.ro_consts_primary.clone(),
         NUM_FE_WITHOUT_IO_FOR_CRHF + 2 * vk.F_arity_secondary,
       );
-      hasher2.absorb(scalar_as_base::<G1>(vk.r1cs_shape_primary_digest));
+      hasher2.absorb(scalar_as_base::<G1>(vk.digest));
       hasher2.absorb(G2::Scalar::from(num_steps as u64));
       for e in z0_secondary {
         hasher2.absorb(e);
@@ -891,29 +867,27 @@ where
       )
     };
 
-    if hash_primary != scalar_as_base::<G1>(self.l_u_primary.X[1])
+    if hash_primary != self.l_u_secondary.X[0]
       || hash_secondary != scalar_as_base::<G2>(self.l_u_secondary.X[1])
     {
       return Err(NovaError::ProofVerifyError);
     }
 
     // fold the running instance and last instance to get a folded instance
-    let f_U_primary = self.nifs_primary.verify(
-      &vk.ro_consts_primary,
-      &vk.r1cs_shape_primary_digest,
-      &self.r_U_primary,
-      &self.l_u_primary,
-    )?;
     let f_U_secondary = self.nifs_secondary.verify(
       &vk.ro_consts_secondary,
-      &vk.r1cs_shape_secondary_digest,
+      &scalar_as_base::<G1>(vk.digest),
       &self.r_U_secondary,
       &self.l_u_secondary,
     )?;
 
     // check the satisfiability of the folded instances using SNARKs proving the knowledge of their satisfying witnesses
     let (res_primary, res_secondary) = rayon::join(
-      || self.f_W_snark_primary.verify(&vk.vk_primary, &f_U_primary),
+      || {
+        self
+          .r_W_snark_primary
+          .verify(&vk.vk_primary, &self.r_U_primary)
+      },
       || {
         self
           .f_W_snark_secondary
@@ -933,17 +907,48 @@ type Commitment<G> = <<G as Group>::CE as CommitmentEngineTrait<G>>::Commitment;
 type CompressedCommitment<G> = <<<G as Group>::CE as CommitmentEngineTrait<G>>::Commitment as CommitmentTrait<G>>::CompressedCommitment;
 type CE<G> = <G as Group>::CE;
 
+fn compute_digest<G: Group, T: Serialize>(o: &T) -> G::Scalar {
+  // obtain a vector of bytes representing public parameters
+  let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+  bincode::serialize_into(&mut encoder, o).unwrap();
+  let pp_bytes = encoder.finish().unwrap();
+
+  // convert pp_bytes into a short digest
+  let mut hasher = Sha3_256::new();
+  hasher.input(&pp_bytes);
+  let digest = hasher.result();
+
+  // truncate the digest to NUM_HASH_BITS bits
+  let bv = (0..NUM_HASH_BITS).map(|i| {
+    let (byte_pos, bit_pos) = (i / 8, i % 8);
+    let bit = (digest[byte_pos] >> bit_pos) & 1;
+    bit == 1
+  });
+
+  // turn the bit vector into a scalar
+  let mut digest = G::Scalar::ZERO;
+  let mut coeff = G::Scalar::ONE;
+  for bit in bv {
+    if bit {
+      digest += coeff;
+    }
+    coeff += coeff;
+  }
+  digest
+}
+
 #[cfg(test)]
 mod tests {
+  use crate::provider::pedersen::CommitmentKeyExtTrait;
+
   use super::*;
-  type G1 = pasta_curves::pallas::Point;
-  type G2 = pasta_curves::vesta::Point;
-  type EE1 = provider::ipa_pc::EvaluationEngine<G1>;
-  type EE2 = provider::ipa_pc::EvaluationEngine<G2>;
-  type CC1 = spartan::spark::TrivialCompComputationEngine<G1, EE1>;
-  type CC2 = spartan::spark::TrivialCompComputationEngine<G2, EE2>;
-  type S1 = spartan::RelaxedR1CSSNARK<G1, EE1, CC1>;
-  type S2 = spartan::RelaxedR1CSSNARK<G2, EE2, CC2>;
+  type EE1<G1> = provider::ipa_pc::EvaluationEngine<G1>;
+  type EE2<G2> = provider::ipa_pc::EvaluationEngine<G2>;
+  type S1<G1> = spartan::RelaxedR1CSSNARK<G1, EE1<G1>>;
+  type S2<G2> = spartan::RelaxedR1CSSNARK<G2, EE2<G2>>;
+  type S1Prime<G1> = spartan::pp::RelaxedR1CSSNARK<G1, EE1<G1>>;
+  type S2Prime<G2> = spartan::pp::RelaxedR1CSSNARK<G2, EE2<G2>>;
+
   use ::bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
   use core::marker::PhantomData;
   use ff::PrimeField;
@@ -998,15 +1003,21 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_ivc_trivial() {
+  fn test_ivc_trivial_with<G1, G2>()
+  where
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+  {
+    let test_circuit1 = TrivialTestCircuit::<<G1 as Group>::Scalar>::default();
+    let test_circuit2 = TrivialTestCircuit::<<G2 as Group>::Scalar>::default();
+
     // produce public parameters
     let pp = PublicParams::<
       G1,
       G2,
       TrivialTestCircuit<<G1 as Group>::Scalar>,
       TrivialTestCircuit<<G2 as Group>::Scalar>,
-    >::setup(TrivialTestCircuit::default(), TrivialTestCircuit::default());
+    >::setup(test_circuit1.clone(), test_circuit2.clone());
 
     let num_steps = 1;
 
@@ -1014,10 +1025,10 @@ mod tests {
     let res = RecursiveSNARK::prove_step(
       &pp,
       None,
-      TrivialTestCircuit::default(),
-      TrivialTestCircuit::default(),
-      vec![<G1 as Group>::Scalar::zero()],
-      vec![<G2 as Group>::Scalar::zero()],
+      test_circuit1,
+      test_circuit2,
+      vec![<G1 as Group>::Scalar::ZERO],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
     let recursive_snark = res.unwrap();
@@ -1026,14 +1037,24 @@ mod tests {
     let res = recursive_snark.verify(
       &pp,
       num_steps,
-      vec![<G1 as Group>::Scalar::zero()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ZERO],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
   }
 
   #[test]
-  fn test_ivc_nontrivial() {
+  fn test_ivc_trivial() {
+    type G1 = pasta_curves::pallas::Point;
+    type G2 = pasta_curves::vesta::Point;
+    test_ivc_trivial_with::<G1, G2>();
+  }
+
+  fn test_ivc_nontrivial_with<G1, G2>()
+  where
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+  {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
 
@@ -1063,8 +1084,8 @@ mod tests {
         recursive_snark,
         circuit_primary.clone(),
         circuit_secondary.clone(),
-        vec![<G1 as Group>::Scalar::one()],
-        vec![<G2 as Group>::Scalar::zero()],
+        vec![<G1 as Group>::Scalar::ONE],
+        vec![<G2 as Group>::Scalar::ZERO],
       );
       assert!(res.is_ok());
       let recursive_snark_unwrapped = res.unwrap();
@@ -1073,8 +1094,8 @@ mod tests {
       let res = recursive_snark_unwrapped.verify(
         &pp,
         i + 1,
-        vec![<G1 as Group>::Scalar::one()],
-        vec![<G2 as Group>::Scalar::zero()],
+        vec![<G1 as Group>::Scalar::ONE],
+        vec![<G2 as Group>::Scalar::ZERO],
       );
       assert!(res.is_ok());
 
@@ -1089,25 +1110,41 @@ mod tests {
     let res = recursive_snark.verify(
       &pp,
       num_steps,
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
 
     let (zn_primary, zn_secondary) = res.unwrap();
 
     // sanity: check the claimed output with a direct computation of the same
-    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
-    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::zero()];
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::ONE]);
+    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::ZERO];
     for _i in 0..num_steps {
-      zn_secondary_direct = CubicCircuit::default().output(&zn_secondary_direct);
+      zn_secondary_direct = circuit_secondary.clone().output(&zn_secondary_direct);
     }
     assert_eq!(zn_secondary, zn_secondary_direct);
     assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(2460515u64)]);
   }
 
   #[test]
-  fn test_ivc_nontrivial_with_compression() {
+  fn test_ivc_nontrivial() {
+    type G1 = pasta_curves::pallas::Point;
+    type G2 = pasta_curves::vesta::Point;
+
+    test_ivc_nontrivial_with::<G1, G2>();
+  }
+
+  fn test_ivc_nontrivial_with_compression_with<G1, G2>()
+  where
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+    // this is due to the reliance on CommitmentKeyExtTrait as a bound in ipa_pc
+    <G1::CE as CommitmentEngineTrait<G1>>::CommitmentKey:
+      CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
+    <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
+      CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+  {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
 
@@ -1137,8 +1174,8 @@ mod tests {
         recursive_snark,
         circuit_primary.clone(),
         circuit_secondary.clone(),
-        vec![<G1 as Group>::Scalar::one()],
-        vec![<G2 as Group>::Scalar::zero()],
+        vec![<G1 as Group>::Scalar::ONE],
+        vec![<G2 as Group>::Scalar::ZERO],
       );
       assert!(res.is_ok());
       recursive_snark = Some(res.unwrap());
@@ -1151,27 +1188,27 @@ mod tests {
     let res = recursive_snark.verify(
       &pp,
       num_steps,
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
 
     let (zn_primary, zn_secondary) = res.unwrap();
 
     // sanity: check the claimed output with a direct computation of the same
-    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
-    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::zero()];
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::ONE]);
+    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::ZERO];
     for _i in 0..num_steps {
-      zn_secondary_direct = CubicCircuit::default().output(&zn_secondary_direct);
+      zn_secondary_direct = circuit_secondary.clone().output(&zn_secondary_direct);
     }
     assert_eq!(zn_secondary, zn_secondary_direct);
     assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(2460515u64)]);
 
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp).unwrap();
+    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1<G1>, S2<G2>>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
-    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
+    let res = CompressedSNARK::<_, _, _, _, S1<G1>, S2<G2>>::prove(&pp, &pk, &recursive_snark);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1179,14 +1216,30 @@ mod tests {
     let res = compressed_snark.verify(
       &vk,
       num_steps,
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
   }
 
   #[test]
-  fn test_ivc_nontrivial_with_spark_compression() {
+  fn test_ivc_nontrivial_with_compression() {
+    type G1 = pasta_curves::pallas::Point;
+    type G2 = pasta_curves::vesta::Point;
+
+    test_ivc_nontrivial_with_compression_with::<G1, G2>();
+  }
+
+  fn test_ivc_nontrivial_with_spark_compression_with<G1, G2>()
+  where
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+    // this is due to the reliance on CommitmentKeyExtTrait as a bound in ipa_pc
+    <G1::CE as CommitmentEngineTrait<G1>>::CommitmentKey:
+      CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
+    <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
+      CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+  {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
 
@@ -1216,8 +1269,8 @@ mod tests {
         recursive_snark,
         circuit_primary.clone(),
         circuit_secondary.clone(),
-        vec![<G1 as Group>::Scalar::one()],
-        vec![<G2 as Group>::Scalar::zero()],
+        vec![<G1 as Group>::Scalar::ONE],
+        vec![<G2 as Group>::Scalar::ZERO],
       );
       assert!(res.is_ok());
       recursive_snark = Some(res.unwrap());
@@ -1230,16 +1283,16 @@ mod tests {
     let res = recursive_snark.verify(
       &pp,
       num_steps,
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
 
     let (zn_primary, zn_secondary) = res.unwrap();
 
     // sanity: check the claimed output with a direct computation of the same
-    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
-    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::zero()];
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::ONE]);
+    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::ZERO];
     for _i in 0..num_steps {
       zn_secondary_direct = CubicCircuit::default().output(&zn_secondary_direct);
     }
@@ -1247,16 +1300,13 @@ mod tests {
     assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(2460515u64)]);
 
     // run the compressed snark with Spark compiler
-    type CC1Prime = spartan::spark::SparkEngine<G1, EE1>;
-    type CC2Prime = spartan::spark::SparkEngine<G2, EE2>;
-    type S1Prime = spartan::RelaxedR1CSSNARK<G1, EE1, CC1Prime>;
-    type S2Prime = spartan::RelaxedR1CSSNARK<G2, EE2, CC2Prime>;
 
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1Prime, S2Prime>::setup(&pp).unwrap();
+    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1Prime<G1>, S2Prime<G2>>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
-    let res = CompressedSNARK::<_, _, _, _, S1Prime, S2Prime>::prove(&pp, &pk, &recursive_snark);
+    let res =
+      CompressedSNARK::<_, _, _, _, S1Prime<G1>, S2Prime<G2>>::prove(&pp, &pk, &recursive_snark);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1264,14 +1314,30 @@ mod tests {
     let res = compressed_snark.verify(
       &vk,
       num_steps,
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
   }
 
   #[test]
-  fn test_ivc_nondet_with_compression() {
+  fn test_ivc_nontrivial_with_spark_compression() {
+    type G1 = pasta_curves::pallas::Point;
+    type G2 = pasta_curves::vesta::Point;
+
+    test_ivc_nontrivial_with_spark_compression_with::<G1, G2>();
+  }
+
+  fn test_ivc_nondet_with_compression_with<G1, G2>()
+  where
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+    // this is due to the reliance on CommitmentKeyExtTrait as a bound in ipa_pc
+    <G1::CE as CommitmentEngineTrait<G1>>::CommitmentKey:
+      CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
+    <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
+      CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+  {
     // y is a non-deterministic advice representing the fifth root of the input at a step.
     #[derive(Clone, Debug)]
     struct FifthRootCheckingCircuit<F: PrimeField> {
@@ -1354,7 +1420,7 @@ mod tests {
     }
 
     let circuit_primary = FifthRootCheckingCircuit {
-      y: <G1 as Group>::Scalar::zero(),
+      y: <G1 as Group>::Scalar::ZERO,
     };
 
     let circuit_secondary = TrivialTestCircuit::default();
@@ -1371,7 +1437,7 @@ mod tests {
 
     // produce non-deterministic advice
     let (z0_primary, roots) = FifthRootCheckingCircuit::new(num_steps);
-    let z0_secondary = vec![<G2 as Group>::Scalar::zero()];
+    let z0_secondary = vec![<G2 as Group>::Scalar::ZERO];
 
     // produce a recursive SNARK
     let mut recursive_snark: Option<
@@ -1404,10 +1470,10 @@ mod tests {
     assert!(res.is_ok());
 
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp).unwrap();
+    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1<G1>, S2<G2>>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
-    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
+    let res = CompressedSNARK::<_, _, _, _, S1<G1>, S2<G2>>::prove(&pp, &pk, &recursive_snark);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1417,7 +1483,18 @@ mod tests {
   }
 
   #[test]
-  fn test_ivc_base() {
+  fn test_ivc_nondet_with_compression() {
+    type G1 = pasta_curves::pallas::Point;
+    type G2 = pasta_curves::vesta::Point;
+
+    test_ivc_nondet_with_compression_with::<G1, G2>();
+  }
+
+  fn test_ivc_base_with<G1, G2>()
+  where
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+  {
     // produce public parameters
     let pp = PublicParams::<
       G1,
@@ -1434,8 +1511,8 @@ mod tests {
       None,
       TrivialTestCircuit::default(),
       CubicCircuit::default(),
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
     let recursive_snark = res.unwrap();
@@ -1444,14 +1521,22 @@ mod tests {
     let res = recursive_snark.verify(
       &pp,
       num_steps,
-      vec![<G1 as Group>::Scalar::one()],
-      vec![<G2 as Group>::Scalar::zero()],
+      vec![<G1 as Group>::Scalar::ONE],
+      vec![<G2 as Group>::Scalar::ZERO],
     );
     assert!(res.is_ok());
 
     let (zn_primary, zn_secondary) = res.unwrap();
 
-    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::ONE]);
     assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(5u64)]);
+  }
+
+  #[test]
+  fn test_ivc_base() {
+    type G1 = pasta_curves::pallas::Point;
+    type G2 = pasta_curves::vesta::Point;
+
+    test_ivc_base_with::<G1, G2>();
   }
 }

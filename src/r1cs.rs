@@ -1,7 +1,7 @@
 //! This module defines R1CS related types and a folding scheme for Relaxed R1CS
 #![allow(clippy::type_complexity)]
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_HASH_BITS},
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   errors::NovaError,
   gadgets::{
     nonnative::{bignat::nat_to_limbs, util::f_to_nat},
@@ -15,11 +15,9 @@ use crate::{
 use abomonation::Abomonation;
 use core::{cmp::max, marker::PhantomData};
 use ff::Field;
-use flate2::{write::ZlibEncoder, Compression};
 use itertools::concat;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
 
 /// Public parameters for a given R1CS
 #[derive(Clone, Serialize, Deserialize)]
@@ -37,7 +35,6 @@ pub struct R1CSShape<G: Group> {
   pub(crate) A: Vec<(usize, usize, G::Scalar)>,
   pub(crate) B: Vec<(usize, usize, G::Scalar)>,
   pub(crate) C: Vec<(usize, usize, G::Scalar)>,
-  digest: G::Scalar, // digest of the rest of R1CSShape
 }
 
 impl<G: Group> Abomonation for R1CSShape<G> {
@@ -115,8 +112,8 @@ impl<G: Group> R1CS<G> {
   pub fn commitment_key(S: &R1CSShape<G>) -> CommitmentKey<G> {
     let num_cons = S.num_cons;
     let num_vars = S.num_vars;
-    let num_nz = max(max(S.A.len(), S.B.len()), S.C.len());
-    G::CE::setup(b"ck", max(max(num_cons, num_vars), num_nz))
+    let total_nz = S.A.len() + S.B.len() + S.C.len();
+    G::CE::setup(b"ck", max(max(num_cons, num_vars), total_nz))
   }
 }
 
@@ -166,19 +163,14 @@ impl<G: Group> R1CSShape<G> {
       return Err(NovaError::OddInputLength);
     }
 
-    let digest = Self::compute_digest(num_cons, num_vars, num_io, A, B, C);
-
-    let shape = R1CSShape {
+    Ok(R1CSShape {
       num_cons,
       num_vars,
       num_io,
       A: A.to_owned(),
       B: B.to_owned(),
       C: C.to_owned(),
-      digest,
-    };
-
-    Ok(shape)
+    })
   }
 
   pub fn multiply_vec(
@@ -199,7 +191,7 @@ impl<G: Group> R1CSShape<G> {
             let (row, col, val) = M[i];
             (row, val * z[col])
           })
-          .fold(vec![G::Scalar::zero(); num_rows], |mut Mz, (r, v)| {
+          .fold(vec![G::Scalar::ZERO; num_rows], |mut Mz, (r, v)| {
             Mz[r] += v;
             Mz
           })
@@ -270,7 +262,7 @@ impl<G: Group> R1CSShape<G> {
 
     // verify if Az * Bz = u*Cz
     let res_eq: bool = {
-      let z = concat(vec![W.W.clone(), vec![G::Scalar::one()], U.X.clone()]);
+      let z = concat(vec![W.W.clone(), vec![G::Scalar::ONE], U.X.clone()]);
       let (Az, Bz, Cz) = self.multiply_vec(&z)?;
       assert_eq!(Az.len(), self.num_cons);
       assert_eq!(Bz.len(), self.num_cons);
@@ -309,7 +301,7 @@ impl<G: Group> R1CSShape<G> {
     };
 
     let (AZ_2, BZ_2, CZ_2) = {
-      let Z2 = concat(vec![W2.W.clone(), vec![G::Scalar::one()], U2.X.clone()]);
+      let Z2 = concat(vec![W2.W.clone(), vec![G::Scalar::ONE], U2.X.clone()]);
       self.multiply_vec(&Z2)?
     };
 
@@ -343,67 +335,6 @@ impl<G: Group> R1CSShape<G> {
     Ok((T, comm_T))
   }
 
-  /// returns the digest of R1CSShape
-  pub fn get_digest(&self) -> G::Scalar {
-    self.digest
-  }
-
-  fn compute_digest(
-    num_cons: usize,
-    num_vars: usize,
-    num_io: usize,
-    A: &[(usize, usize, G::Scalar)],
-    B: &[(usize, usize, G::Scalar)],
-    C: &[(usize, usize, G::Scalar)],
-  ) -> G::Scalar {
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    struct R1CSShapeWithoutDigest<G: Group> {
-      num_cons: usize,
-      num_vars: usize,
-      num_io: usize,
-      A: Vec<(usize, usize, G::Scalar)>,
-      B: Vec<(usize, usize, G::Scalar)>,
-      C: Vec<(usize, usize, G::Scalar)>,
-    }
-
-    let shape = R1CSShapeWithoutDigest::<G> {
-      num_cons,
-      num_vars,
-      num_io,
-      A: A.to_vec(),
-      B: B.to_vec(),
-      C: C.to_vec(),
-    };
-
-    // obtain a vector of bytes representing the R1CS shape
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    bincode::serialize_into(&mut encoder, &shape).unwrap();
-    let shape_bytes = encoder.finish().unwrap();
-
-    // convert shape_bytes into a short digest
-    let mut hasher = Sha3_256::new();
-    hasher.input(&shape_bytes);
-    let digest = hasher.result();
-
-    // truncate the digest to 250 bits
-    let bv = (0..NUM_HASH_BITS).map(|i| {
-      let (byte_pos, bit_pos) = (i / 8, i % 8);
-      let bit = (digest[byte_pos] >> bit_pos) & 1;
-      bit == 1
-    });
-
-    // turn the bit vector into a scalar
-    let mut res = G::Scalar::zero();
-    let mut coeff = G::Scalar::one();
-    for bit in bv {
-      if bit {
-        res += coeff;
-      }
-      coeff += coeff;
-    }
-    res
-  }
-
   /// Pads the R1CSShape so that the number of variables is a power of two
   /// Renumbers variables to accomodate padded variables
   pub fn pad(&self) -> Self {
@@ -418,8 +349,6 @@ impl<G: Group> R1CSShape<G> {
     // check if the number of variables are as expected, then
     // we simply set the number of constraints to the next power of two
     if self.num_vars == m {
-      let digest = Self::compute_digest(m, self.num_vars, self.num_io, &self.A, &self.B, &self.C);
-
       return R1CSShape {
         num_cons: m,
         num_vars: m,
@@ -427,7 +356,6 @@ impl<G: Group> R1CSShape<G> {
         A: self.A.clone(),
         B: self.B.clone(),
         C: self.C.clone(),
-        digest,
       };
     }
 
@@ -437,11 +365,15 @@ impl<G: Group> R1CSShape<G> {
     let apply_pad = |M: &[(usize, usize, G::Scalar)]| -> Vec<(usize, usize, G::Scalar)> {
       M.par_iter()
         .map(|(r, c, v)| {
-          if c >= &self.num_vars {
-            (*r, c + num_vars_padded - self.num_vars, *v)
-          } else {
-            (*r, *c, *v)
-          }
+          (
+            *r,
+            if c >= &self.num_vars {
+              c + num_vars_padded - self.num_vars
+            } else {
+              *c
+            },
+            *v,
+          )
         })
         .collect::<Vec<_>>()
     };
@@ -450,15 +382,6 @@ impl<G: Group> R1CSShape<G> {
     let B_padded = apply_pad(&self.B);
     let C_padded = apply_pad(&self.C);
 
-    let digest = Self::compute_digest(
-      num_cons_padded,
-      num_vars_padded,
-      self.num_io,
-      &A_padded,
-      &B_padded,
-      &C_padded,
-    );
-
     R1CSShape {
       num_cons: num_cons_padded,
       num_vars: num_vars_padded,
@@ -466,20 +389,7 @@ impl<G: Group> R1CSShape<G> {
       A: A_padded,
       B: B_padded,
       C: C_padded,
-      digest,
     }
-  }
-}
-
-impl<G: Group> TranscriptReprTrait<G> for R1CSShape<G> {
-  fn to_transcript_bytes(&self) -> Vec<u8> {
-    self.get_digest().to_transcript_bytes()
-  }
-}
-
-impl<G: Group> AbsorbInROTrait<G> for R1CSShape<G> {
-  fn absorb_in_ro(&self, ro: &mut G::RO) {
-    ro.absorb(scalar_as_base::<G>(self.get_digest()));
   }
 }
 
@@ -530,8 +440,8 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   /// Produces a default RelaxedR1CSWitness given an R1CSShape
   pub fn default(S: &R1CSShape<G>) -> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
-      W: vec![G::Scalar::zero(); S.num_vars],
-      E: vec![G::Scalar::zero(); S.num_cons],
+      W: vec![G::Scalar::ZERO; S.num_vars],
+      E: vec![G::Scalar::ZERO; S.num_cons],
     }
   }
 
@@ -539,7 +449,7 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   pub fn from_r1cs_witness(S: &R1CSShape<G>, witness: &R1CSWitness<G>) -> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
       W: witness.W.clone(),
-      E: vec![G::Scalar::zero(); S.num_cons],
+      E: vec![G::Scalar::ZERO; S.num_cons],
     }
   }
 
@@ -579,13 +489,13 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   pub fn pad(&self, S: &R1CSShape<G>) -> RelaxedR1CSWitness<G> {
     let W = {
       let mut W = self.W.clone();
-      W.extend(vec![G::Scalar::zero(); S.num_vars - W.len()]);
+      W.extend(vec![G::Scalar::ZERO; S.num_vars - W.len()]);
       W
     };
 
     let E = {
       let mut E = self.E.clone();
-      E.extend(vec![G::Scalar::zero(); S.num_cons - E.len()]);
+      E.extend(vec![G::Scalar::ZERO; S.num_cons - E.len()]);
       E
     };
 
@@ -600,8 +510,8 @@ impl<G: Group> RelaxedR1CSInstance<G> {
     RelaxedR1CSInstance {
       comm_W,
       comm_E,
-      u: G::Scalar::zero(),
-      X: vec![G::Scalar::zero(); S.num_io],
+      u: G::Scalar::ZERO,
+      X: vec![G::Scalar::ZERO; S.num_io],
     }
   }
 
@@ -613,9 +523,22 @@ impl<G: Group> RelaxedR1CSInstance<G> {
   ) -> RelaxedR1CSInstance<G> {
     let mut r_instance = RelaxedR1CSInstance::default(ck, S);
     r_instance.comm_W = instance.comm_W;
-    r_instance.u = G::Scalar::one();
+    r_instance.u = G::Scalar::ONE;
     r_instance.X = instance.X.clone();
     r_instance
+  }
+
+  /// Initializes a new RelaxedR1CSInstance from an R1CSInstance
+  pub fn from_r1cs_instance_unchecked(
+    comm_W: &Commitment<G>,
+    X: &[G::Scalar],
+  ) -> RelaxedR1CSInstance<G> {
+    RelaxedR1CSInstance {
+      comm_W: *comm_W,
+      comm_E: Commitment::<G>::default(),
+      u: G::Scalar::ONE,
+      X: X.to_vec(),
+    }
   }
 
   /// Folds an incoming RelaxedR1CSInstance into the current one
