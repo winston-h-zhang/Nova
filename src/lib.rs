@@ -649,8 +649,7 @@ where
     self.F_arity_secondary.entomb(bytes)?;
     self.ro_consts_primary.entomb(bytes)?;
     self.ro_consts_secondary.entomb(bytes)?;
-    unsafe_serde::entomb_T(&self.r1cs_shape_primary_digest, bytes)?;
-    unsafe_serde::entomb_T(&self.r1cs_shape_secondary_digest, bytes)?;
+    unsafe_serde::entomb_T(&self.digest, bytes)?;
     self.vk_primary.entomb(bytes)?;
     self.vk_secondary.entomb(bytes)?;
     Ok(())
@@ -661,8 +660,7 @@ where
     let temp = bytes; bytes = self.F_arity_secondary.exhume(temp)?;
     let temp = bytes; bytes = self.ro_consts_primary.exhume(temp)?;
     let temp = bytes; bytes = self.ro_consts_secondary.exhume(temp)?;
-    let temp = bytes; bytes = unsafe_serde::exhume_T(&mut self.r1cs_shape_primary_digest, temp)?;
-    let temp = bytes; bytes = unsafe_serde::exhume_T(&mut self.r1cs_shape_secondary_digest, temp)?;
+    let temp = bytes; bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
     let temp = bytes; bytes = self.vk_primary.exhume(temp)?;
     let temp = bytes; bytes = self.vk_secondary.exhume(temp)?;
     Some(bytes)
@@ -674,8 +672,7 @@ where
     size += self.F_arity_secondary.extent();
     size += self.ro_consts_primary.extent();
     size += self.ro_consts_secondary.extent();
-    size += unsafe_serde::extent_T(&self.r1cs_shape_primary_digest);
-    size += unsafe_serde::extent_T(&self.r1cs_shape_secondary_digest);
+    size += unsafe_serde::extent_T(&self.digest);
     size += self.vk_primary.extent();
     size += self.vk_secondary.extent();
     size

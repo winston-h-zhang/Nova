@@ -12,7 +12,7 @@ use crate::{
   traits::{
     evaluation::EvaluationEngineTrait, snark::RelaxedR1CSSNARKTrait, Group, TranscriptEngineTrait,
   },
-  Commitment, CommitmentKey,
+  Commitment, CommitmentKey, unsafe_serde,
 };
 use abomonation::Abomonation;
 use ff::Field;
@@ -134,18 +134,16 @@ pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   vk_digest: G::Scalar, // digest of the verifier's key
 }
 
-impl<G, EE, CC> Abomonation for ProverKey<G, EE, CC>
+impl<G, EE> Abomonation for ProverKey<G, EE>
 where
   G: Group,
   EE: EvaluationEngineTrait<G, CE = G::CE>,
-  CC: CompCommitmentEngineTrait<G, EE>,
 {
   #[inline]
   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
     self.pk_ee.entomb(bytes)?;
     self.S.entomb(bytes)?;
-    self.decomm.entomb(bytes)?;
-    self.comm.entomb(bytes)?;
+    unsafe_serde::entomb_T(&self.vk_digest, bytes)?;
     Ok(())
   }
 
@@ -156,9 +154,7 @@ where
     let temp = bytes;
     bytes = self.S.exhume(temp)?;
     let temp = bytes;
-    bytes = self.decomm.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.comm.exhume(temp)?;
+    bytes = unsafe_serde::exhume_T(&mut self.vk_digest, temp)?;
     Some(bytes)
   }
 
@@ -167,8 +163,7 @@ where
     let mut size = 0;
     size += self.pk_ee.extent();
     size += self.S.extent();
-    size += self.decomm.extent();
-    size += self.comm.extent();
+    size += unsafe_serde::extent_T(&self.vk_digest);
     size
   }
 }
@@ -182,41 +177,36 @@ pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   digest: G::Scalar,
 }
 
-impl<G, EE, CC> Abomonation for VerifierKey<G, EE, CC>
+impl<G, EE> Abomonation for VerifierKey<G, EE>
 where
   G: Group,
   EE: EvaluationEngineTrait<G, CE = G::CE>,
-  CC: CompCommitmentEngineTrait<G, EE>,
 {
   #[inline]
   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.num_cons.entomb(bytes)?;
-    self.num_vars.entomb(bytes)?;
     self.vk_ee.entomb(bytes)?;
-    self.comm.entomb(bytes)?;
+    self.S.entomb(bytes)?;
+    unsafe_serde::entomb_T(&self.digest, bytes)?;
     Ok(())
   }
 
   #[inline]
   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
     let temp = bytes;
-    bytes = self.num_cons.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.num_vars.exhume(temp)?;
-    let temp = bytes;
     bytes = self.vk_ee.exhume(temp)?;
     let temp = bytes;
-    bytes = self.comm.exhume(temp)?;
+    bytes = self.S.exhume(temp)?;
+    let temp = bytes;
+    bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
     Some(bytes)
   }
 
   #[inline]
   fn extent(&self) -> usize {
     let mut size = 0;
-    size += self.num_cons.extent();
-    size += self.num_vars.extent();
     size += self.vk_ee.extent();
-    size += self.comm.extent();
+    size += self.S.extent();
+    size += unsafe_serde::extent_T(&self.digest);
     size
   }
 }
