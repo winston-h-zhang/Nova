@@ -16,7 +16,7 @@ use nova_snark::{
   },
   PublicParams,
 };
-use std::{io::Write, mem::size_of, time::Instant};
+use std::{io::{Write, Read}, mem::size_of, time::Instant};
 
 /// Unspeakable horrors
 unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
@@ -148,7 +148,7 @@ fn main() {
   println!("Nova-based VDF with MinRoot delay function");
   println!("=========================================================");
 
-  let num_iters_per_step = 1024;
+  let num_iters_per_step = 128;
   // number of iterations of MinRoot per Nova's recursive step
   let circuit_primary = MinRootCircuit {
     seq: vec![
@@ -166,7 +166,7 @@ fn main() {
 
   println!("Proving {num_iters_per_step} iterations of MinRoot per step");
 
-  let mut bytes = Vec::new();
+  let mut file = std::fs::File::create("data").unwrap();
   unsafe {
     let start = Instant::now();
     println!("Producing public parameters...");
@@ -177,11 +177,15 @@ fn main() {
       TrivialTestCircuit<<G2 as Group>::Scalar>,
     >::setup(circuit_primary.clone(), circuit_secondary.clone());
     println!("PublicParams::setup, took {:?} ", start.elapsed());
-    encode(&pp, &mut bytes).unwrap()
+    encode(&pp, &mut file).unwrap()
   };
   println!("Encoded!");
-  println!("Read size: {}", bytes.len());
 
+  let file = std::fs::File::open("data")
+    .unwrap();
+  let mut reader = std::io::BufReader::new(file);
+  let mut bytes = Vec::new();
+  reader.read_to_end(&mut bytes).unwrap();
   if let Some((result, remaining)) = unsafe {
     decode::<
       PublicParams<

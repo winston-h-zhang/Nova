@@ -12,9 +12,10 @@ use crate::{
   traits::{
     evaluation::EvaluationEngineTrait, snark::RelaxedR1CSSNARKTrait, Group, TranscriptEngineTrait,
   },
-  Commitment, CommitmentKey, unsafe_serde,
+  Commitment, CommitmentKey,
 };
 use abomonation::Abomonation;
+use abomonation_derive::Abomonation;
 use ff::Field;
 use itertools::concat;
 use polynomial::{EqPolynomial, MultilinearPolynomial, SparsePolynomial};
@@ -126,90 +127,95 @@ impl<G: Group> PolyEvalInstance<G> {
 }
 
 /// A type that represents the prover's key
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Abomonation)]
 #[serde(bound = "")]
+#[abomonation_bounds(where <G::Scalar as ff::PrimeField>::Repr: Abomonation)]
 pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   pk_ee: EE::ProverKey,
   S: R1CSShape<G>,
+  #[abomonate_with(<G::Scalar as ff::PrimeField>::Repr)]
   vk_digest: G::Scalar, // digest of the verifier's key
 }
 
-impl<G, EE> Abomonation for ProverKey<G, EE>
-where
-  G: Group,
-  EE: EvaluationEngineTrait<G, CE = G::CE>,
-{
-  #[inline]
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.pk_ee.entomb(bytes)?;
-    self.S.entomb(bytes)?;
-    unsafe_serde::entomb_T(&self.vk_digest, bytes)?;
-    Ok(())
-  }
+// impl<G, EE> Abomonation for ProverKey<G, EE>
+// where
+//   G: Group,
+//   EE: EvaluationEngineTrait<G, CE = G::CE>,
+// {
+//   #[inline]
+//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
+//     self.pk_ee.entomb(bytes)?;
+//     self.S.entomb(bytes)?;
+//     self.vk_digest
+//     unsafe_serde::entomb_T(&self.vk_digest, bytes)?;
+//     Ok(())
+//   }
 
-  #[inline]
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes;
-    bytes = self.pk_ee.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.S.exhume(temp)?;
-    let temp = bytes;
-    bytes = unsafe_serde::exhume_T(&mut self.vk_digest, temp)?;
-    Some(bytes)
-  }
+//   #[inline]
+//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+//     let temp = bytes;
+//     bytes = self.pk_ee.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.S.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = unsafe_serde::exhume_T(&mut self.vk_digest, temp)?;
+//     Some(bytes)
+//   }
 
-  #[inline]
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += self.pk_ee.extent();
-    size += self.S.extent();
-    size += unsafe_serde::extent_T(&self.vk_digest);
-    size
-  }
-}
+//   #[inline]
+//   fn extent(&self) -> usize {
+//     let mut size = 0;
+//     size += self.pk_ee.extent();
+//     size += self.S.extent();
+//     size += unsafe_serde::extent_T(&self.vk_digest);
+//     size
+//   }
+// }
 
 /// A type that represents the verifier's key
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Abomonation)]
 #[serde(bound = "")]
+#[abomonation_bounds(where <G::Scalar as ff::PrimeField>::Repr: Abomonation)]
 pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   vk_ee: EE::VerifierKey,
   S: R1CSShape<G>,
+  #[abomonate_with(<G::Scalar as ff::PrimeField>::Repr)]
   digest: G::Scalar,
 }
 
-impl<G, EE> Abomonation for VerifierKey<G, EE>
-where
-  G: Group,
-  EE: EvaluationEngineTrait<G, CE = G::CE>,
-{
-  #[inline]
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.vk_ee.entomb(bytes)?;
-    self.S.entomb(bytes)?;
-    unsafe_serde::entomb_T(&self.digest, bytes)?;
-    Ok(())
-  }
+// impl<G, EE> Abomonation for VerifierKey<G, EE>
+// where
+//   G: Group,
+//   EE: EvaluationEngineTrait<G, CE = G::CE>,
+// {
+//   #[inline]
+//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
+//     self.vk_ee.entomb(bytes)?;
+//     self.S.entomb(bytes)?;
+//     unsafe_serde::entomb_T(&self.digest, bytes)?;
+//     Ok(())
+//   }
 
-  #[inline]
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes;
-    bytes = self.vk_ee.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.S.exhume(temp)?;
-    let temp = bytes;
-    bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
-    Some(bytes)
-  }
+//   #[inline]
+//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+//     let temp = bytes;
+//     bytes = self.vk_ee.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.S.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
+//     Some(bytes)
+//   }
 
-  #[inline]
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += self.vk_ee.extent();
-    size += self.S.extent();
-    size += unsafe_serde::extent_T(&self.digest);
-    size
-  }
-}
+//   #[inline]
+//   fn extent(&self) -> usize {
+//     let mut size = 0;
+//     size += self.vk_ee.extent();
+//     size += self.S.extent();
+//     size += unsafe_serde::extent_T(&self.digest);
+//     size
+//   }
+// }
 
 /// A succinct proof of knowledge of a witness to a relaxed R1CS instance
 /// The proof is produced using Spartan's combination of the sum-check and
@@ -229,6 +235,8 @@ pub struct RelaxedR1CSSNARK<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> 
 
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G>
   for RelaxedR1CSSNARK<G, EE>
+where
+  <G::Scalar as ff::PrimeField>::Repr: Abomonation,
 {
   type ProverKey = ProverKey<G, EE>;
   type VerifierKey = VerifierKey<G, EE>;

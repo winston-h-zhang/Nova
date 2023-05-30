@@ -17,7 +17,6 @@ mod circuit;
 mod constants;
 mod nifs;
 mod r1cs;
-mod unsafe_serde;
 
 // public modules
 pub mod errors;
@@ -33,11 +32,12 @@ use crate::bellperson::{
 };
 use ::bellperson::{Circuit, ConstraintSystem};
 use abomonation::Abomonation;
+use abomonation_derive::Abomonation;
 use circuit::{NovaAugmentedCircuit, NovaAugmentedCircuitInputs, NovaAugmentedCircuitParams};
 use constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_WITHOUT_IO_FOR_CRHF, NUM_HASH_BITS};
 use core::marker::PhantomData;
 use errors::NovaError;
-use ff::Field;
+use ff::{Field, PrimeField};
 use flate2::{write::ZlibEncoder, Compression};
 use gadgets::utils::scalar_as_base;
 use nifs::NIFS;
@@ -54,6 +54,15 @@ use traits::{
 /// A type that holds public parameters of Nova
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
+// #[abomonation_bounds(
+// where
+//   G1: Group<Base = <G2 as Group>::Scalar>,
+//   G2: Group<Base = <G1 as Group>::Scalar>,
+//   C1: StepCircuit<G1::Scalar>,
+//   C2: StepCircuit<G2::Scalar>,
+//   <G1::Scalar as PrimeField>::Repr: Abomonation,
+//   <G2::Scalar as PrimeField>::Repr: Abomonation,
+// )]
 pub struct PublicParams<G1, G2, C1, C2>
 where
   G1: Group<Base = <G2 as Group>::Scalar>,
@@ -73,81 +82,85 @@ where
   r1cs_shape_secondary: R1CSShape<G2>,
   augmented_circuit_params_primary: NovaAugmentedCircuitParams,
   augmented_circuit_params_secondary: NovaAugmentedCircuitParams,
+  // #[abomonate_with(<G1::Scalar as PrimeField>::Repr)]
   digest: G1::Scalar, // digest of everything else with this field set to G1::Scalar::ZERO
   _p_c1: PhantomData<C1>,
   _p_c2: PhantomData<C2>,
 }
 
-impl<G1, G2, C1, C2> Abomonation for PublicParams<G1, G2, C1, C2>
+impl<G1, G2, C1, C2> abomonation::Abomonation for PublicParams<G1, G2, C1, C2>
 where
-  G1: Group<Base = <G2 as Group>::Scalar>,
-  G2: Group<Base = <G1 as Group>::Scalar>,
-  C1: StepCircuit<G1::Scalar>,
-  C2: StepCircuit<G2::Scalar>,
+    G1: Group<Base = <G2 as Group>::Scalar>,
+    G2: Group<Base = <G1 as Group>::Scalar>,
+    C1: StepCircuit<G1::Scalar>,
+    C2: StepCircuit<G2::Scalar>,
+    <G1::Scalar as PrimeField>::Repr: Abomonation,
+    <G2::Scalar as PrimeField>::Repr: Abomonation,
 {
-  #[inline]
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.F_arity_primary.entomb(bytes)?;
-    self.F_arity_secondary.entomb(bytes)?;
-    self.ro_consts_primary.entomb(bytes)?;
-    self.ro_consts_circuit_primary.entomb(bytes)?;
-    self.ck_primary.entomb(bytes)?;
-    self.r1cs_shape_primary.entomb(bytes)?;
-    self.ro_consts_secondary.entomb(bytes)?;
-    self.ro_consts_circuit_secondary.entomb(bytes)?;
-    self.ck_secondary.entomb(bytes)?;
-    self.r1cs_shape_secondary.entomb(bytes)?;
-    self.augmented_circuit_params_primary.entomb(bytes)?;
-    self.augmented_circuit_params_secondary.entomb(bytes)?;
-    Ok(())
-  }
-
-  #[inline]
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes;
-    bytes = self.F_arity_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.F_arity_secondary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.ro_consts_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.ro_consts_circuit_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.ck_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.r1cs_shape_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.ro_consts_secondary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.ro_consts_circuit_secondary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.ck_secondary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.r1cs_shape_secondary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.augmented_circuit_params_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.augmented_circuit_params_secondary.exhume(temp)?;
-    Some(bytes)
-  }
-
-  #[inline]
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += self.F_arity_primary.extent();
-    size += self.F_arity_secondary.extent();
-    size += self.ro_consts_primary.extent();
-    size += self.ro_consts_circuit_primary.extent();
-    size += self.ck_primary.extent();
-    size += self.r1cs_shape_primary.extent();
-    size += self.ro_consts_secondary.extent();
-    size += self.ro_consts_circuit_secondary.extent();
-    size += self.ck_secondary.extent();
-    size += self.r1cs_shape_secondary.extent();
-    size += self.augmented_circuit_params_primary.extent();
-    size += self.augmented_circuit_params_secondary.extent();
-    size
-  }
+    #[inline]
+    unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
+        self.F_arity_primary.entomb(bytes)?;
+        self.F_arity_secondary.entomb(bytes)?;
+        self.ro_consts_primary.entomb(bytes)?;
+        self.ro_consts_circuit_primary.entomb(bytes)?;
+        self.ck_primary.entomb(bytes)?;
+        self.r1cs_shape_primary.entomb(bytes)?;
+        self.ro_consts_secondary.entomb(bytes)?;
+        self.ro_consts_circuit_secondary.entomb(bytes)?;
+        self.ck_secondary.entomb(bytes)?;
+        self.r1cs_shape_secondary.entomb(bytes)?;
+        self.augmented_circuit_params_primary.entomb(bytes)?;
+        self.augmented_circuit_params_secondary.entomb(bytes)?;
+        let __this = &self.digest as *const _ as *const <G1::Scalar as PrimeField>::Repr;
+        (*__this).entomb(bytes)?;
+        self._p_c1.entomb(bytes)?;
+        self._p_c2.entomb(bytes)?;
+        Ok(())
+    }
+    #[inline]
+    unsafe fn exhume<'a, 'b>(
+        &'a mut self,
+        mut bytes: &'b mut [u8],
+    ) -> Option<&'b mut [u8]> {
+        bytes = self.F_arity_primary.exhume(bytes)?;
+        bytes = self.F_arity_secondary.exhume(bytes)?;
+        bytes = self.ro_consts_primary.exhume(bytes)?;
+        bytes = self.ro_consts_circuit_primary.exhume(bytes)?;
+        bytes = self.ck_primary.exhume(bytes)?;
+        bytes = self.r1cs_shape_primary.exhume(bytes)?;
+        bytes = self.ro_consts_secondary.exhume(bytes)?;
+        bytes = self.ro_consts_circuit_secondary.exhume(bytes)?;
+        bytes = self.ck_secondary.exhume(bytes)?;
+        bytes = self.r1cs_shape_secondary.exhume(bytes)?;
+        bytes = self.augmented_circuit_params_primary.exhume(bytes)?;
+        bytes = self.augmented_circuit_params_secondary.exhume(bytes)?;
+        let __this = &mut self.digest as *mut _ as *mut <G1::Scalar as PrimeField>::Repr;
+        bytes = (&mut *__this).exhume(bytes)?;
+        bytes = self._p_c1.exhume(bytes)?;
+        bytes = self._p_c2.exhume(bytes)?;
+        Some(bytes)
+    }
+    #[inline]
+    fn extent(&self) -> usize {
+        let mut size = 0;
+        size += self.F_arity_primary.extent();
+        size += self.F_arity_secondary.extent();
+        size += self.ro_consts_primary.extent();
+        size += self.ro_consts_circuit_primary.extent();
+        size += self.ck_primary.extent();
+        size += self.r1cs_shape_primary.extent();
+        size += self.ro_consts_secondary.extent();
+        size += self.ro_consts_circuit_secondary.extent();
+        size += self.ck_secondary.extent();
+        size += self.r1cs_shape_secondary.extent();
+        size += self.augmented_circuit_params_primary.extent();
+        size += self.augmented_circuit_params_secondary.extent();
+        let __this = &self.digest as *const _ as *const <G1::Scalar as PrimeField>::Repr;
+        size += unsafe { (*__this).extent() };
+        size += self._p_c1.extent();
+        size += self._p_c2.extent();
+        size
+    }
 }
 
 impl<G1, G2, C1, C2> PublicParams<G1, G2, C1, C2>
@@ -564,8 +577,9 @@ where
 }
 
 /// A type that holds the prover key for `CompressedSNARK`
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Abomonation)]
 #[serde(bound = "")]
+#[abomonation_omit_bounds]
 pub struct ProverKey<G1, G2, C1, C2, S1, S2>
 where
   G1: Group<Base = <G2 as Group>::Scalar>,
@@ -581,40 +595,50 @@ where
   _p_c2: PhantomData<C2>,
 }
 
-impl<G1, G2, C1, C2, S1, S2> Abomonation for ProverKey<G1, G2, C1, C2, S1, S2>
-where
+// impl<G1, G2, C1, C2, S1, S2> Abomonation for ProverKey<G1, G2, C1, C2, S1, S2>
+// where
+//   G1: Group<Base = <G2 as Group>::Scalar>,
+//   G2: Group<Base = <G1 as Group>::Scalar>,
+//   C1: StepCircuit<G1::Scalar>,
+//   C2: StepCircuit<G2::Scalar>,
+//   S1: RelaxedR1CSSNARKTrait<G1>,
+//   S2: RelaxedR1CSSNARKTrait<G2>,
+// {
+//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
+//     self.pk_primary.entomb(bytes)?;
+//     self.pk_secondary.entomb(bytes)?;
+//     Ok(())
+//   }
+
+//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+//     let temp = bytes;
+//     bytes = self.pk_primary.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.pk_secondary.exhume(temp)?;
+//     Some(bytes)
+//   }
+
+//   fn extent(&self) -> usize {
+//     let mut size = 0;
+//     size += self.pk_primary.extent();
+//     size += self.pk_secondary.extent();
+//     size
+//   }
+// }
+
+/// A type that holds the verifier key for `CompressedSNARK`
+#[derive(Clone, Serialize, Deserialize, Abomonation)]
+#[serde(bound = "")]
+#[abomonation_bounds(
+where 
   G1: Group<Base = <G2 as Group>::Scalar>,
   G2: Group<Base = <G1 as Group>::Scalar>,
   C1: StepCircuit<G1::Scalar>,
   C2: StepCircuit<G2::Scalar>,
   S1: RelaxedR1CSSNARKTrait<G1>,
   S2: RelaxedR1CSSNARKTrait<G2>,
-{
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.pk_primary.entomb(bytes)?;
-    self.pk_secondary.entomb(bytes)?;
-    Ok(())
-  }
-
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes;
-    bytes = self.pk_primary.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.pk_secondary.exhume(temp)?;
-    Some(bytes)
-  }
-
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += self.pk_primary.extent();
-    size += self.pk_secondary.extent();
-    size
-  }
-}
-
-/// A type that holds the verifier key for `CompressedSNARK`
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+  <G1::Scalar as PrimeField>::Repr: Abomonation,
+)]
 pub struct VerifierKey<G1, G2, C1, C2, S1, S2>
 where
   G1: Group<Base = <G2 as Group>::Scalar>,
@@ -628,6 +652,7 @@ where
   F_arity_secondary: usize,
   ro_consts_primary: ROConstants<G1>,
   ro_consts_secondary: ROConstants<G2>,
+  #[abomonate_with(<G1::Scalar as PrimeField>::Repr)]
   digest: G1::Scalar,
   vk_primary: S1::VerifierKey,
   vk_secondary: S2::VerifierKey,
@@ -635,49 +660,56 @@ where
   _p_c2: PhantomData<C2>,
 }
 
-impl<G1, G2, C1, C2, S1, S2> Abomonation for VerifierKey<G1, G2, C1, C2, S1, S2>
-where
-  G1: Group<Base = <G2 as Group>::Scalar>,
-  G2: Group<Base = <G1 as Group>::Scalar>,
-  C1: StepCircuit<G1::Scalar>,
-  C2: StepCircuit<G2::Scalar>,
-  S1: RelaxedR1CSSNARKTrait<G1>,
-  S2: RelaxedR1CSSNARKTrait<G2>,
-{
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.F_arity_primary.entomb(bytes)?;
-    self.F_arity_secondary.entomb(bytes)?;
-    self.ro_consts_primary.entomb(bytes)?;
-    self.ro_consts_secondary.entomb(bytes)?;
-    unsafe_serde::entomb_T(&self.digest, bytes)?;
-    self.vk_primary.entomb(bytes)?;
-    self.vk_secondary.entomb(bytes)?;
-    Ok(())
-  }
+// impl<G1, G2, C1, C2, S1, S2> Abomonation for VerifierKey<G1, G2, C1, C2, S1, S2>
+// where
+//   G1: Group<Base = <G2 as Group>::Scalar>,
+//   G2: Group<Base = <G1 as Group>::Scalar>,
+//   C1: StepCircuit<G1::Scalar>,
+//   C2: StepCircuit<G2::Scalar>,
+//   S1: RelaxedR1CSSNARKTrait<G1>,
+//   S2: RelaxedR1CSSNARKTrait<G2>,
+// {
+//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
+//     self.F_arity_primary.entomb(bytes)?;
+//     self.F_arity_secondary.entomb(bytes)?;
+//     self.ro_consts_primary.entomb(bytes)?;
+//     self.ro_consts_secondary.entomb(bytes)?;
+//     unsafe_serde::entomb_T(&self.digest, bytes)?;
+//     self.vk_primary.entomb(bytes)?;
+//     self.vk_secondary.entomb(bytes)?;
+//     Ok(())
+//   }
 
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes; bytes = self.F_arity_primary.exhume(temp)?;
-    let temp = bytes; bytes = self.F_arity_secondary.exhume(temp)?;
-    let temp = bytes; bytes = self.ro_consts_primary.exhume(temp)?;
-    let temp = bytes; bytes = self.ro_consts_secondary.exhume(temp)?;
-    let temp = bytes; bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
-    let temp = bytes; bytes = self.vk_primary.exhume(temp)?;
-    let temp = bytes; bytes = self.vk_secondary.exhume(temp)?;
-    Some(bytes)
-  }
+//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+//     let temp = bytes;
+//     bytes = self.F_arity_primary.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.F_arity_secondary.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.ro_consts_primary.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.ro_consts_secondary.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
+//     let temp = bytes;
+//     bytes = self.vk_primary.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.vk_secondary.exhume(temp)?;
+//     Some(bytes)
+//   }
 
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += self.F_arity_primary.extent();
-    size += self.F_arity_secondary.extent();
-    size += self.ro_consts_primary.extent();
-    size += self.ro_consts_secondary.extent();
-    size += unsafe_serde::extent_T(&self.digest);
-    size += self.vk_primary.extent();
-    size += self.vk_secondary.extent();
-    size
-  }
-}
+//   fn extent(&self) -> usize {
+//     let mut size = 0;
+//     size += self.F_arity_primary.extent();
+//     size += self.F_arity_secondary.extent();
+//     size += self.ro_consts_primary.extent();
+//     size += self.ro_consts_secondary.extent();
+//     size += unsafe_serde::extent_T(&self.digest);
+//     size += self.vk_primary.extent();
+//     size += self.vk_secondary.extent();
+//     size
+//   }
+// }
 
 /// A SNARK that proves the knowledge of a valid `RecursiveSNARK`
 #[derive(Clone, Serialize, Deserialize)]
@@ -1141,6 +1173,9 @@ mod tests {
       CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
     <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
       CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+    // this is due to the reliance on Abomonation
+    <<G1 as traits::Group>::Scalar as ff::PrimeField>::Repr: abomonation::Abomonation,
+    <<G2 as traits::Group>::Scalar as ff::PrimeField>::Repr: abomonation::Abomonation,
   {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
@@ -1236,6 +1271,9 @@ mod tests {
       CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
     <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
       CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+    // this is due to the reliance on Abomonation
+    <<G1 as traits::Group>::Scalar as ff::PrimeField>::Repr: abomonation::Abomonation,
+    <<G2 as traits::Group>::Scalar as ff::PrimeField>::Repr: abomonation::Abomonation,
   {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
@@ -1334,6 +1372,9 @@ mod tests {
       CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
     <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
       CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+    // this is due to the reliance on Abomonation
+    <<G1 as traits::Group>::Scalar as ff::PrimeField>::Repr: abomonation::Abomonation,
+    <<G2 as traits::Group>::Scalar as ff::PrimeField>::Repr: abomonation::Abomonation,
   {
     // y is a non-deterministic advice representing the fifth root of the input at a step.
     #[derive(Clone, Debug)]

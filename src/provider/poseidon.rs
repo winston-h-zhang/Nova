@@ -1,9 +1,7 @@
 //! Poseidon Constants and Poseidon-based RO used in Nova
-use crate::{
-  traits::{ROCircuitTrait, ROConstantsTrait, ROTrait},
-  unsafe_serde,
-};
+use crate::traits::{ROCircuitTrait, ROConstantsTrait, ROTrait};
 use abomonation::Abomonation;
+use abomonation_derive::Abomonation;
 use bellperson::{
   gadgets::{
     boolean::{AllocatedBit, Boolean},
@@ -27,30 +25,9 @@ use neptune::{
 use serde::{Deserialize, Serialize};
 
 /// All Poseidon Constants that are used in Nova
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Abomonation)]
+#[abomonation_bounds(where Scalar::Repr: Abomonation)]
 pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(PoseidonConstants<Scalar, U24>);
-
-impl<Scalar: PrimeField> Abomonation for PoseidonConstantsCircuit<Scalar> {
-  #[inline]
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    self.0.entomb(bytes)?;
-    Ok(())
-  }
-
-  #[inline]
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes;
-    bytes = self.0.exhume(temp)?;
-    Some(bytes)
-  }
-
-  #[inline]
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += self.0.extent();
-    size
-  }
-}
 
 impl<Scalar> ROConstantsTrait<Scalar> for PoseidonConstantsCircuit<Scalar>
 where
@@ -64,13 +41,20 @@ where
 }
 
 /// A Poseidon-based RO to use outside circuits
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Abomonation)]
+#[abomonation_bounds(
+  where
+    Base: PrimeField + PrimeFieldBits,
+    Scalar: PrimeField + PrimeFieldBits,
+    <Base as PrimeField>::Repr: Abomonation
+)]
 pub struct PoseidonRO<Base, Scalar>
 where
   Base: PrimeField + PrimeFieldBits,
   Scalar: PrimeField + PrimeFieldBits,
 {
   // Internal State
+  #[abomonate_with(Vec<Base::Repr>)]
   state: Vec<Base>,
   constants: PoseidonConstantsCircuit<Base>,
   num_absorbs: usize,
@@ -78,47 +62,48 @@ where
   _p: PhantomData<Scalar>,
 }
 
-impl<Base, Scalar> Abomonation for PoseidonRO<Base, Scalar>
-where
-  Base: PrimeField + PrimeFieldBits,
-  Scalar: PrimeField + PrimeFieldBits,
-{
-  #[inline]
-  unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-    unsafe_serde::entomb_vec_T(&self.state, bytes)?;
-    self.constants.entomb(bytes)?;
-    self.num_absorbs.entomb(bytes)?;
-    self.squeezed.entomb(bytes)?;
-    Ok(())
-  }
+// impl<Base, Scalar> Abomonation for PoseidonRO<Base, Scalar>
+// where
+//   Base: PrimeField + PrimeFieldBits,
+//   Scalar: PrimeField + PrimeFieldBits,
+// {
+//   #[inline]
+//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
+//     unsafe_serde::entomb_vec_T(&self.state, bytes)?;
+//     self.constants.entomb(bytes)?;
+//     self.num_absorbs.entomb(bytes)?;
+//     self.squeezed.entomb(bytes)?;
+//     Ok(())
+//   }
 
-  #[inline]
-  unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-    let temp = bytes;
-    bytes = unsafe_serde::exhume_vec_T(&mut self.state, temp)?;
-    let temp = bytes;
-    bytes = self.constants.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.num_absorbs.exhume(temp)?;
-    let temp = bytes;
-    bytes = self.squeezed.exhume(temp)?;
-    Some(bytes)
-  }
+//   #[inline]
+//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+//     let temp = bytes;
+//     bytes = unsafe_serde::exhume_vec_T(&mut self.state, temp)?;
+//     let temp = bytes;
+//     bytes = self.constants.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.num_absorbs.exhume(temp)?;
+//     let temp = bytes;
+//     bytes = self.squeezed.exhume(temp)?;
+//     Some(bytes)
+//   }
 
-  #[inline]
-  fn extent(&self) -> usize {
-    let mut size = 0;
-    size += unsafe_serde::extent_vec_T(&self.state);
-    size += self.constants.extent();
-    size += self.num_absorbs.extent();
-    size += self.squeezed.extent();
-    size
-  }
-}
+//   #[inline]
+//   fn extent(&self) -> usize {
+//     let mut size = 0;
+//     size += unsafe_serde::extent_vec_T(&self.state);
+//     size += self.constants.extent();
+//     size += self.num_absorbs.extent();
+//     size += self.squeezed.extent();
+//     size
+//   }
+// }
 
 impl<Base, Scalar> ROTrait<Base, Scalar> for PoseidonRO<Base, Scalar>
 where
   Base: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
+  Base::Repr: Abomonation,
   Scalar: PrimeField + PrimeFieldBits,
 {
   type Constants = PoseidonConstantsCircuit<Base>;
@@ -188,6 +173,7 @@ where
 impl<Scalar> ROCircuitTrait<Scalar> for PoseidonROCircuit<Scalar>
 where
   Scalar: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
+  Scalar::Repr: Abomonation,
 {
   type Constants = PoseidonConstantsCircuit<Scalar>;
 
@@ -276,8 +262,8 @@ mod tests {
   where
     // we can print the field elements we get from G's Base & Scalar fields,
     // and compare their byte representations
-    <<G as Group>::Base as PrimeField>::Repr: std::fmt::Debug,
-    <<G as Group>::Scalar as PrimeField>::Repr: std::fmt::Debug,
+    <<G as Group>::Base as PrimeField>::Repr: std::fmt::Debug + Abomonation,
+    <<G as Group>::Scalar as PrimeField>::Repr: std::fmt::Debug + Abomonation,
     <<G as Group>::Base as PrimeField>::Repr: PartialEq<<<G as Group>::Scalar as PrimeField>::Repr>,
   {
     // Check that the number computed inside the circuit is equal to the number computed outside the circuit
