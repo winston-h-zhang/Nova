@@ -62,44 +62,6 @@ where
   _p: PhantomData<Scalar>,
 }
 
-// impl<Base, Scalar> Abomonation for PoseidonRO<Base, Scalar>
-// where
-//   Base: PrimeField + PrimeFieldBits,
-//   Scalar: PrimeField + PrimeFieldBits,
-// {
-//   #[inline]
-//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-//     unsafe_serde::entomb_vec_T(&self.state, bytes)?;
-//     self.constants.entomb(bytes)?;
-//     self.num_absorbs.entomb(bytes)?;
-//     self.squeezed.entomb(bytes)?;
-//     Ok(())
-//   }
-
-//   #[inline]
-//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-//     let temp = bytes;
-//     bytes = unsafe_serde::exhume_vec_T(&mut self.state, temp)?;
-//     let temp = bytes;
-//     bytes = self.constants.exhume(temp)?;
-//     let temp = bytes;
-//     bytes = self.num_absorbs.exhume(temp)?;
-//     let temp = bytes;
-//     bytes = self.squeezed.exhume(temp)?;
-//     Some(bytes)
-//   }
-
-//   #[inline]
-//   fn extent(&self) -> usize {
-//     let mut size = 0;
-//     size += unsafe_serde::extent_vec_T(&self.state);
-//     size += self.constants.extent();
-//     size += self.num_absorbs.extent();
-//     size += self.squeezed.extent();
-//     size
-//   }
-// }
-
 impl<Base, Scalar> ROTrait<Base, Scalar> for PoseidonRO<Base, Scalar>
 where
   Base: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,

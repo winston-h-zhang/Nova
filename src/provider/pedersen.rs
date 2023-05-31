@@ -25,28 +25,6 @@ pub struct CommitmentKey<G: Group> {
   _p: PhantomData<G>,
 }
 
-// impl<G: Group> Abomonation for CommitmentKey<G> {
-//   #[inline]
-//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-//     unsafe_serde::entomb_vec_T(&self.ck, bytes)?;
-//     Ok(())
-//   }
-
-//   #[inline]
-//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-//     let temp = bytes;
-//     bytes = unsafe_serde::exhume_vec_T(&mut self.ck, temp)?;
-//     Some(bytes)
-//   }
-
-//   #[inline]
-//   fn extent(&self) -> usize {
-//     let mut size = 0;
-//     size += unsafe_serde::extent_vec_T(&self.ck);
-//     size
-//   }
-// }
-
 /// A type that holds a commitment
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
 #[serde(bound = "")]
@@ -55,28 +33,6 @@ pub struct Commitment<G: Group> {
   #[abomonate_with(Vec<[u64; 12]>)] // this is a hack; we just assume the size of the element.
   pub(crate) comm: G,
 }
-
-// impl<G: Group> Abomonation for Commitment<G> {
-//   #[inline]
-//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-//     unsafe_serde::entomb_T(&self.comm, bytes)?;
-//     Ok(())
-//   }
-
-//   #[inline]
-//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-//     let temp = bytes;
-//     bytes = unsafe_serde::exhume_T(&mut self.comm, temp)?;
-//     Some(bytes)
-//   }
-
-//   #[inline]
-//   fn extent(&self) -> usize {
-//     let mut size = 0;
-//     size += unsafe_serde::extent_T(&self.comm);
-//     size
-//   }
-// }
 
 /// A type that holds a compressed commitment
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

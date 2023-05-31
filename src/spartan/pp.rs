@@ -755,48 +755,18 @@ pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   vk_digest: G::Scalar, // digest of verifier's key
 }
 
-// impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> Abomonation for ProverKey<G, EE> {
-//   #[inline]
-//   unsafe fn entomb<W: std::io::Write>(&self, bytes: &mut W) -> std::io::Result<()> {
-//     self.pk_ee.entomb(bytes)?;
-//     self.S.entomb(bytes)?;
-//     unsafe_serde::entomb_T(&self.digest, bytes)?;
-//     Ok(())
-//   }
-
-//   #[inline]
-//   unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-//     let temp = bytes;
-//     bytes = self.vk_ee.exhume(temp)?;
-//     let temp = bytes;
-//     bytes = self.S.exhume(temp)?;
-//     let temp = bytes;
-//     bytes = unsafe_serde::exhume_T(&mut self.digest, temp)?;
-//     Some(bytes)
-//   }
-
-//   #[inline]
-//   fn extent(&self) -> usize {
-//     let mut size = 0;
-//     size += self.vk_ee.extent();
-//     size += self.S.extent();
-//     size += unsafe_serde::extent_T(&self.digest);
-//     size
-//   }
-// }
-
 /// A type that represents the verifier's key
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Abomonation)]
 #[serde(bound = "")]
+#[abomonation_bounds(where <G::Scalar as PrimeField>::Repr: Abomonation)]
 pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   num_cons: usize,
   num_vars: usize,
   vk_ee: EE::VerifierKey,
   S_comm: R1CSShapeSparkCommitment<G>,
+  #[abomonate_with(<G::Scalar as PrimeField>::Repr)]
   digest: G::Scalar,
 }
-
-impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> Abomonation for VerifierKey<G, EE> {}
 
 /// A succinct proof of knowledge of a witness to a relaxed R1CS instance
 /// The proof is produced using Spartan's combination of the sum-check and
