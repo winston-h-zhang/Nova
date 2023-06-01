@@ -13,13 +13,22 @@ use core::{
 };
 use ff::Field;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use pasta_curves::group::UncompressedEncoding;
 
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentKey<G: Group> {
+  #[serde(serialize_with = "ser_uncompressed::<G, __S>")]
   ck: Vec<G::PreprocessedGroupElement>,
   _p: PhantomData<G>,
+}
+
+fn ser_uncompressed<G: Group, S: Serializer>(
+  this: &Vec<G::PreprocessedGroupElement>,
+  serializer: S,
+) -> Result<S::Ok, S::Error> {
+  serializer.collect_seq(this.iter().map(|x| x.to_uncompressed()))
 }
 
 /// A type that holds a commitment

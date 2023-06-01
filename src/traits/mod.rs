@@ -4,6 +4,7 @@ use bellperson::{
   gadgets::{boolean::AllocatedBit, num::AllocatedNum},
   ConstraintSystem, SynthesisError,
 };
+use pasta_curves::group::UncompressedEncoding;
 use core::{
   fmt::Debug,
   ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
@@ -56,7 +57,7 @@ pub trait Group:
     + for<'de> Deserialize<'de>;
 
   /// A type representing preprocessed group element
-  type PreprocessedGroupElement: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type PreprocessedGroupElement: UncompressedEncoding + Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// A type that represents a circuit-friendly sponge that consumes elements
   /// from the base field and squeezes out elements of the scalar field
