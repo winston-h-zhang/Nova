@@ -24,11 +24,18 @@ pub struct CommitmentKey<G: Group> {
   _p: PhantomData<G>,
 }
 
-fn ser_uncompressed<G: Group, S: Serializer>(
+fn ser_uncompressed<G, S>(
   this: &Vec<G::PreprocessedGroupElement>,
   serializer: S,
-) -> Result<S::Ok, S::Error> {
-  serializer.collect_seq(this.iter().map(|x| x.to_uncompressed()))
+) -> Result<S::Ok, S::Error> 
+where
+  G: Group, 
+  S: Serializer
+{
+  let this: Vec<_> = this.iter().map(|x| {
+    x.to_uncompressed().as_ref()
+  }).collect::<Vec<&[u8]>>();
+  serializer.collect_seq(this)
 }
 
 /// A type that holds a commitment
