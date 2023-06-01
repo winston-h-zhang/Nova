@@ -30,9 +30,10 @@ use bellperson::{
   Circuit, ConstraintSystem, SynthesisError,
 };
 use ff::Field;
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct NovaAugmentedCircuitParams {
   limb_width: usize,
   n_limbs: usize,

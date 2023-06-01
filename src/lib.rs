@@ -9,7 +9,7 @@
 )]
 #![allow(non_snake_case)]
 #![allow(clippy::type_complexity)]
-#![forbid(unsafe_code)]
+// #![forbid(unsafe_code)]
 
 // private modules
 mod bellperson;
@@ -33,6 +33,7 @@ use crate::bellperson::{
 use ::bellperson::{Circuit, ConstraintSystem};
 use circuit::{NovaAugmentedCircuit, NovaAugmentedCircuitInputs, NovaAugmentedCircuitParams};
 use constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_WITHOUT_IO_FOR_CRHF, NUM_HASH_BITS};
+use rkyv::Archive;
 use core::marker::PhantomData;
 use errors::NovaError;
 use ff::Field;
@@ -50,7 +51,7 @@ use traits::{
 };
 
 /// A type that holds public parameters of Nova
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct PublicParams<G1, G2, C1, C2>
 where

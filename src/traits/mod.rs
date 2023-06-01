@@ -4,6 +4,7 @@ use bellperson::{
   gadgets::{boolean::AllocatedBit, num::AllocatedNum},
   ConstraintSystem, SynthesisError,
 };
+use rkyv::Archive;
 use core::{
   fmt::Debug,
   ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
@@ -134,7 +135,8 @@ pub trait ROTrait<Base, Scalar> {
     + Send
     + Sync
     + Serialize
-    + for<'de> Deserialize<'de>;
+    + for<'de> Deserialize<'de>
+    + Archive;
 
   /// Initializes the hash function
   fn new(constants: Self::Constants, num_absorbs: usize) -> Self;
@@ -154,7 +156,8 @@ pub trait ROCircuitTrait<Base: PrimeField> {
     + Send
     + Sync
     + Serialize
-    + for<'de> Deserialize<'de>;
+    + for<'de> Deserialize<'de>
+    + Archive;
 
   /// Initializes the hash function
   fn new(constants: Self::Constants, num_absorbs: usize) -> Self;

@@ -12,12 +12,15 @@ use core::{
   ops::{Add, AddAssign, Mul, MulAssign},
 };
 use ff::Field;
+use neptune::unsafe_rkyv::Raw;
 use rayon::prelude::*;
+use rkyv::{Archive};
 use serde::{Deserialize, Serialize};
 
 /// A type that holds commitment generators
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct CommitmentKey<G: Group> {
+  #[with(Raw<Vec<[u64; 8]>>)] // this is a hack; we just assume the size of the group element
   ck: Vec<G::PreprocessedGroupElement>,
   _p: PhantomData<G>,
 }
