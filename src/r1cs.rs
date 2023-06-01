@@ -13,10 +13,12 @@ use crate::{
   Commitment, CommitmentKey, CE,
 };
 use core::{cmp::max, marker::PhantomData};
-use ff::Field;
+use ff::{Field, PrimeField};
 use itertools::concat;
 use rayon::prelude::*;
+use rkyv::{Archive};
 use serde::{Deserialize, Serialize};
+use neptune::unsafe_rkyv::Raw;
 
 /// Public parameters for a given R1CS
 #[derive(Clone, Serialize, Deserialize)]
@@ -26,13 +28,16 @@ pub struct R1CS<G: Group> {
 }
 
 /// A type that holds the shape of the R1CS matrices
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct R1CSShape<G: Group> {
   pub(crate) num_cons: usize,
   pub(crate) num_vars: usize,
   pub(crate) num_io: usize,
+  #[with(Raw<Vec<(usize, usize, <G::Scalar as PrimeField>::Repr)>>)]
   pub(crate) A: Vec<(usize, usize, G::Scalar)>,
+  #[with(Raw<Vec<(usize, usize, <G::Scalar as PrimeField>::Repr)>>)]
   pub(crate) B: Vec<(usize, usize, G::Scalar)>,
+  #[with(Raw<Vec<(usize, usize, <G::Scalar as PrimeField>::Repr)>>)]
   pub(crate) C: Vec<(usize, usize, G::Scalar)>,
 }
 

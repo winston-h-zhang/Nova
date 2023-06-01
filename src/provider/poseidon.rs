@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 /// All Poseidon Constants that are used in Nova
 #[derive(Clone, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[omit_bounds]
 pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(PoseidonConstants<Scalar, U24>);
 
 impl<Scalar> ROConstantsTrait<Scalar> for PoseidonConstantsCircuit<Scalar>
@@ -57,6 +58,7 @@ impl<Base, Scalar> ROTrait<Base, Scalar> for PoseidonRO<Base, Scalar>
 where
   Base: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
   Scalar: PrimeField + PrimeFieldBits,
+  <Base as PrimeField>::Repr: Archive,
 {
   type Constants = PoseidonConstantsCircuit<Base>;
 
@@ -125,6 +127,7 @@ where
 impl<Scalar> ROCircuitTrait<Scalar> for PoseidonROCircuit<Scalar>
 where
   Scalar: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
+  <Scalar as PrimeField>::Repr: Archive,
 {
   type Constants = PoseidonConstantsCircuit<Scalar>;
 
@@ -216,6 +219,7 @@ mod tests {
     <<G as Group>::Base as PrimeField>::Repr: std::fmt::Debug,
     <<G as Group>::Scalar as PrimeField>::Repr: std::fmt::Debug,
     <<G as Group>::Base as PrimeField>::Repr: PartialEq<<<G as Group>::Scalar as PrimeField>::Repr>,
+    <<G as Group>::Scalar as ff::PrimeField>::Repr: Archive,
   {
     // Check that the number computed inside the circuit is equal to the number computed outside the circuit
     let mut csprng: OsRng = OsRng;
