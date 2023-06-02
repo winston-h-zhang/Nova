@@ -4,13 +4,13 @@ use bellperson::{
   gadgets::{boolean::AllocatedBit, num::AllocatedNum},
   ConstraintSystem, SynthesisError,
 };
-use pasta_curves::group::UncompressedEncoding;
 use core::{
   fmt::Debug,
   ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 use ff::{PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
+use pasta_curves::group::UncompressedEncoding;
 use serde::{Deserialize, Serialize};
 
 pub mod commitment;
@@ -57,7 +57,14 @@ pub trait Group:
     + for<'de> Deserialize<'de>;
 
   /// A type representing preprocessed group element
-  type PreprocessedGroupElement: UncompressedEncoding + Clone + Debug + PartialEq + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type PreprocessedGroupElement: SerializableUncompressed
+    + Clone
+    + Debug
+    + PartialEq
+    + Send
+    + Sync
+    + Serialize
+    + for<'de> Deserialize<'de>;
 
   /// A type that represents a circuit-friendly sponge that consumes elements
   /// from the base field and squeezes out elements of the scalar field
@@ -98,6 +105,18 @@ pub trait Group:
 
   /// Returns A, B, and the order of the group as a big integer
   fn get_curve_params() -> (Self::Base, Self::Base, BigInt);
+}
+
+pub trait SerializableUncompressed: UncompressedEncoding<Uncompressed = Self::T> {
+  type T: Serialize + for<'de> Deserialize<'de>;
+}
+
+impl<T> SerializableUncompressed for T
+where
+  T: UncompressedEncoding,
+  <T as UncompressedEncoding>::Uncompressed: Serialize + for<'de> Deserialize<'de>,
+{
+  type T = <Self as UncompressedEncoding>::Uncompressed;
 }
 
 /// Represents a compressed version of a group element
