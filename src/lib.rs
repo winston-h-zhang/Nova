@@ -33,15 +33,15 @@ use crate::bellperson::{
 use ::bellperson::{Circuit, ConstraintSystem};
 use circuit::{NovaAugmentedCircuit, NovaAugmentedCircuitInputs, NovaAugmentedCircuitParams};
 use constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_WITHOUT_IO_FOR_CRHF, NUM_HASH_BITS};
-use rkyv::Archive;
 use core::marker::PhantomData;
 use errors::NovaError;
 use ff::{Field, PrimeField};
 use flate2::{write::ZlibEncoder, Compression};
 use gadgets::utils::scalar_as_base;
-use nifs::NIFS;
 use neptune::unsafe_rkyv::Raw;
+use nifs::NIFS;
 use r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness};
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use traits::{
@@ -493,7 +493,7 @@ where
 }
 
 /// A type that holds the prover key for `CompressedSNARK`
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct ProverKey<G1, G2, C1, C2, S1, S2>
 where
@@ -511,7 +511,7 @@ where
 }
 
 /// A type that holds the verifier key for `CompressedSNARK`
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<G1, G2, C1, C2, S1, S2>
 where
@@ -526,6 +526,7 @@ where
   F_arity_secondary: usize,
   ro_consts_primary: ROConstants<G1>,
   ro_consts_secondary: ROConstants<G2>,
+  #[with(Raw<<G1::Scalar as PrimeField>::Repr>)]
   digest: G1::Scalar,
   vk_primary: S1::VerifierKey,
   vk_secondary: S2::VerifierKey,
@@ -995,6 +996,8 @@ mod tests {
       CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
     <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
       CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+    <G1::Scalar as PrimeField>::Repr: Archive,
+    <G2::Scalar as PrimeField>::Repr: Archive,
   {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
@@ -1090,6 +1093,8 @@ mod tests {
       CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
     <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
       CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+      <G1::Scalar as PrimeField>::Repr: Archive,
+      <G2::Scalar as PrimeField>::Repr: Archive,
   {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
@@ -1188,6 +1193,8 @@ mod tests {
       CommitmentKeyExtTrait<G1, CE = <G1 as Group>::CE>,
     <G2::CE as CommitmentEngineTrait<G2>>::CommitmentKey:
       CommitmentKeyExtTrait<G2, CE = <G2 as Group>::CE>,
+    <G1::Scalar as PrimeField>::Repr: Archive,
+    <G2::Scalar as PrimeField>::Repr: Archive,
   {
     // y is a non-deterministic advice representing the fifth root of the input at a step.
     #[derive(Clone, Debug)]

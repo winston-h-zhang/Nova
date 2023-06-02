@@ -16,8 +16,10 @@ use crate::{
 };
 use ff::Field;
 use itertools::concat;
+use neptune::unsafe_rkyv::Raw;
 use polynomial::{EqPolynomial, MultilinearPolynomial, SparsePolynomial};
 use rayon::prelude::*;
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use sumcheck::SumcheckProof;
 
@@ -125,20 +127,22 @@ impl<G: Group> PolyEvalInstance<G> {
 }
 
 /// A type that represents the prover's key
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   pk_ee: EE::ProverKey,
   S: R1CSShape<G>,
+  #[with(Raw<<G::Scalar as ff::PrimeField>::Repr>)]
   vk_digest: G::Scalar, // digest of the verifier's key
 }
 
 /// A type that represents the verifier's key
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   vk_ee: EE::VerifierKey,
   S: R1CSShape<G>,
+  #[with(Raw<<G::Scalar as ff::PrimeField>::Repr>)]
   digest: G::Scalar,
 }
 
@@ -160,6 +164,8 @@ pub struct RelaxedR1CSSNARK<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> 
 
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G>
   for RelaxedR1CSSNARK<G, EE>
+where
+  <G::Scalar as ff::PrimeField>::Repr: rkyv::Archive,
 {
   type ProverKey = ProverKey<G, EE>;
   type VerifierKey = VerifierKey<G, EE>;

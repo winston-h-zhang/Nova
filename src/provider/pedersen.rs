@@ -20,15 +20,16 @@ use serde::{Deserialize, Serialize};
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct CommitmentKey<G: Group> {
-  #[with(Raw<Vec<[u64; 8]>>)] // this is a hack; we just assume the size of the group element
+  #[with(Raw<Vec<[u64; 8]>>, rkyv::with::Raw)] // this is a hack; we just assume the size of the group element
   ck: Vec<G::PreprocessedGroupElement>,
   _p: PhantomData<G>,
 }
 
 /// A type that holds a commitment
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct Commitment<G: Group> {
+  #[with(Raw<Vec<[u64; 12]>>)] // this is a hack; we just assume the size of the group element
   pub(crate) comm: G,
 }
 

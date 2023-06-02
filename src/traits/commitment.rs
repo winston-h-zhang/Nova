@@ -85,7 +85,7 @@ pub trait CommitmentEngineTrait<G: Group>:
   type CommitmentKey: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de> + Archive;
 
   /// Holds the type of the commitment
-  type Commitment: CommitmentTrait<G>;
+  type Commitment: CommitmentTrait<G> + Archive;
 
   /// Samples a new commitment key of a specified size
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey;

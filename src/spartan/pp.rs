@@ -29,7 +29,9 @@ use bellperson::{gadgets::num::AllocatedNum, Circuit, ConstraintSystem, Synthesi
 use core::{cmp::max, marker::PhantomData};
 use ff::{Field, PrimeField};
 use itertools::concat;
+use neptune::unsafe_rkyv::Raw;
 use rayon::prelude::*;
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 
 fn vec_to_arr<T, const N: usize>(v: Vec<T>) -> [T; N] {
@@ -79,7 +81,7 @@ pub struct R1CSShapeSparkRepr<G: Group> {
 }
 
 /// A type that holds a commitment to a sparse polynomial
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct R1CSShapeSparkCommitment<G: Group> {
   N: usize, // size of each vector
@@ -741,13 +743,14 @@ pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
 }
 
 /// A type that represents the verifier's key
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   num_cons: usize,
   num_vars: usize,
   vk_ee: EE::VerifierKey,
   S_comm: R1CSShapeSparkCommitment<G>,
+  #[with(Raw<<G::Scalar as PrimeField>::Repr>)]
   digest: G::Scalar,
 }
 
@@ -925,6 +928,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARK<G, EE>
 
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G>
   for RelaxedR1CSSNARK<G, EE>
+where
+  <G::Scalar as PrimeField>::Repr: Archive,
 {
   type ProverKey = ProverKey<G, EE>;
   type VerifierKey = VerifierKey<G, EE>;
@@ -2127,6 +2132,8 @@ where
 
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scalar>>
   SpartanSNARK<G, EE, C>
+where
+  <G::Scalar as PrimeField>::Repr: Archive,
 {
   /// Produces prover and verifier keys for Spartan
   pub fn setup(sc: C) -> Result<(SpartanProverKey<G, EE>, SpartanVerifierKey<G, EE>), NovaError> {
@@ -2252,7 +2259,10 @@ mod tests {
     test_spartan_snark_with::<G, EE>();
   }
 
-  fn test_spartan_snark_with<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>>() {
+  fn test_spartan_snark_with<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>>()
+  where
+    <G::Scalar as PrimeField>::Repr: Archive,
+  {
     let circuit = CubicCircuit::default();
 
     // produce keys

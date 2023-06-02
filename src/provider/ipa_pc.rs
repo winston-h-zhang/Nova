@@ -14,18 +14,19 @@ use crate::{
 use core::iter;
 use ff::Field;
 use rayon::prelude::*;
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 /// Provides an implementation of the prover key
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct ProverKey<G: Group> {
   ck_s: CommitmentKey<G>,
 }
 
 /// Provides an implementation of the verifier key
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<G: Group> {
   ck_v: CommitmentKey<G>,

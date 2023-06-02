@@ -6,6 +6,7 @@ use crate::{
   CommitmentKey,
 };
 
+use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 
 /// A trait that defines the behavior of a zkSNARK
@@ -16,7 +17,7 @@ pub trait RelaxedR1CSSNARKTrait<G: Group>:
   type ProverKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// A type that represents the verifier's key
-  type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de> + Archive;
 
   /// Produces the keys for the prover and the verifier
   fn setup(

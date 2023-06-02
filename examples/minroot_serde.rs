@@ -14,7 +14,11 @@ use nova_snark::{
   CompressedSNARK, PublicParams, RecursiveSNARK,
 };
 use num_bigint::BigUint;
-use std::time::Instant;
+use std::{
+  fs::File,
+  io::{BufReader, Write, Read},
+  time::Instant,
+};
 
 #[derive(Clone, Debug)]
 struct MinRootIteration<F: PrimeField> {
@@ -175,11 +179,25 @@ fn main() {
     >::setup(circuit_primary, circuit_secondary.clone());
     println!("PublicParams::setup, took {:?} ", start.elapsed());
 
+    let start = Instant::now();
+    println!("Serializing public parameters...");
     let bytes = rkyv::to_bytes::<_, 1024>(&pp).expect("failed to serialize vec");
+    let mut file =
+      File::create(format!("data_{num_iters_per_step}")).expect("failed to create file");
+    file.write_all(&bytes).unwrap();
+    println!("Serializing took {:?} ", start.elapsed());
+
+    let start = Instant::now();
+    println!("Deserializing public parameters...");
+
+    let file = File::open(format!("data_{num_iters_per_step}")).unwrap();
+    let mut reader = BufReader::new(file);
     // SAFETY:
     // - The byte slice represents an archived object
     // - The root of the object is stored at the end of the slice
-    let deserialized = unsafe {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    let pp = unsafe {
       rkyv::from_bytes_unchecked::<
         PublicParams<
           G1,
@@ -188,8 +206,9 @@ fn main() {
           TrivialTestCircuit<<G2 as Group>::Scalar>,
         >,
       >(&bytes)
-      .expect("failed to deserialize vec")
+      .expect("get_archived failed to deserialize")
     };
+    println!("Deserializing took {:?} ", start.elapsed());
 
     println!(
       "Number of constraints per step (primary circuit): {}",
