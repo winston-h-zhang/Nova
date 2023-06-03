@@ -21,7 +21,8 @@ rand_chacha = "0.3"
 itertools = "0.9.0"
 subtle = "2.4"
 pasta_curves = { version = "0.5", features = ["repr-c", "serde"] }
-neptune = { git = "https://github.com/winston-h-zhang/neptune.git", rev = "f642873", default-features = false }
+# neptune = { git = "https://github.com/winston-h-zhang/neptune.git", rev = "f642873", default-features = false }
+neptune = { path = "../neptune", default-features = false }
 generic-array = "0.14.4"
 num-bigint = { version = "0.4", features = ["serde", "rand"] }
 num-traits = "0.2"
@@ -33,7 +34,8 @@ bitvec = "1.0"
 byteorder = "1.4.3"
 thiserror = "1.0" 
 abomonation = "0.7.3"
-abomonation_derive = { git = "https://github.com/winston-h-zhang/abomonation_derive.git", rev = "d6321b7" }
+# abomonation_derive = { git = "https://github.com/winston-h-zhang/abomonation_derive.git", rev = "d6321b7" }
+abomonation_derive = { path = "../abomonation_derive" }
 
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 pasta-msm = { version = "0.1.4" }
