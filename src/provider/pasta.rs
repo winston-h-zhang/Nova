@@ -206,130 +206,13 @@ impl<G: Group> TranscriptReprTrait<G> for pallas::Scalar {
   }
 }
 
-impl Group for pallas::Point {
-  type Base = pallas::Base;
-  type Scalar = pallas::Scalar;
-  type CompressedGroupElement = PallasCompressedElementWrapper;
-  type PreprocessedGroupElement = pallas::Affine;
-  type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
-  type TE = Keccak256Transcript<Self>;
-  type CE = CommitmentEngine<Self>;
-  #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-  fn vartime_multiscalar_mul(
-    scalars: &[Self::Scalar],
-    bases: &[Self::PreprocessedGroupElement],
-  ) -> Self {
-    if scalars.len() >= 128 {
-      pasta_msm::pallas(bases, scalars)
-    } else {
-      cpu_best_multiexp(scalars, bases)
-    }
-  }
-  #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-  fn vartime_multiscalar_mul(
-    scalars: &[Self::Scalar],
-    bases: &[Self::PreprocessedGroupElement],
-  ) -> Self {
-    cpu_best_multiexp(scalars, bases)
-  }
-  fn preprocessed(&self) -> Self::PreprocessedGroupElement {
-    self.to_affine()
-  }
-  fn compress(&self) -> Self::CompressedGroupElement {
-    PallasCompressedElementWrapper::new(self.to_bytes())
-  }
-  fn from_label(label: &'static [u8], n: usize) -> Vec<Self::PreprocessedGroupElement> {
-    let mut shake = Shake256::default();
-    shake.input(label);
-    let mut reader = shake.xof_result();
-    let mut uniform_bytes_vec = Vec::new();
-    for _ in 0..n {
-      let mut uniform_bytes = [0u8; 32];
-      reader.read_exact(&mut uniform_bytes).unwrap();
-      uniform_bytes_vec.push(uniform_bytes);
-    }
-    let ck_proj: Vec<Ep> = (0..n)
-      .collect::<Vec<usize>>()
-      .into_par_iter()
-      .map(|i| {
-        let hash = Ep::hash_to_curve("from_uniform_bytes");
-        hash(&uniform_bytes_vec[i])
-      })
-      .collect();
-    let num_threads = rayon::current_num_threads();
-    if ck_proj.len() > num_threads {
-      let chunk = (ck_proj.len() as f64 / num_threads as f64).ceil() as usize;
-      (0..num_threads)
-        .collect::<Vec<usize>>()
-        .into_par_iter()
-        .map(|i| {
-          let start = i * chunk;
-          let end = if i == num_threads - 1 {
-            ck_proj.len()
-          } else {
-            core::cmp::min((i + 1) * chunk, ck_proj.len())
-          };
-          if end > start {
-            let mut ck = vec![EpAffine::identity(); end - start];
-            <Self as Curve>::batch_normalize(&ck_proj[start..end], &mut ck);
-            ck
-          } else {
-            vec![]
-          }
-        })
-        .collect::<Vec<Vec<EpAffine>>>()
-        .into_par_iter()
-        .flatten()
-        .collect()
-    } else {
-      let mut ck = vec![EpAffine::identity(); n];
-      <Self as Curve>::batch_normalize(&ck_proj, &mut ck);
-      ck
-    }
-  }
-  fn to_coordinates(&self) -> (Self::Base, Self::Base, bool) {
-    let coordinates = self.to_affine().coordinates();
-    if coordinates.is_some().unwrap_u8() == 1 {
-      (*coordinates.unwrap().x(), *coordinates.unwrap().y(), false)
-    } else {
-      (Self::Base::zero(), Self::Base::zero(), true)
-    }
-  }
-  fn get_curve_params() -> (Self::Base, Self::Base, BigInt) {
-    let A = pallas::Point::a();
-    let B = pallas::Point::b();
-    let order = BigInt::from_str_radix(
-      "40000000000000000000000000000000224698fc0994a8dd8c46eb2100000001",
-      16,
-    )
-    .unwrap();
-    (A, B, order)
-  }
-  fn zero() -> Self {
-    pallas::Point::identity()
-  }
-  fn get_generator() -> Self {
-    pallas::Point::generator()
-  }
-}
-impl PrimeFieldExt for pallas::Scalar {
-  fn from_uniform(bytes: &[u8]) -> Self {
-    let bytes_arr: [u8; 64] = bytes.try_into().unwrap();
-    pallas::Scalar::from_uniform_bytes(&bytes_arr)
-  }
-}
-impl<G: Group> TranscriptReprTrait<G> for PallasCompressedElementWrapper {
-  fn to_transcript_bytes(&self) -> Vec<u8> {
-    self.repr.to_vec()
-  }
-}
-impl CompressedGroup for PallasCompressedElementWrapper {
-  type GroupElement = pallas::Point;
-  fn decompress(&self) -> Option<pallas::Point> {
-    Some(Ep::from_bytes(&self.repr).unwrap())
-  }
-}
+impl_traits!(
+  pallas,
+  PallasCompressedElementWrapper,
+  Ep,
+  EpAffine,
+  "40000000000000000000000000000000224698fc0994a8dd8c46eb2100000001"
+);
 
 impl_traits!(
   vesta,
