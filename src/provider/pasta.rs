@@ -5,7 +5,7 @@ use crate::{
     pedersen::CommitmentEngine,
     poseidon::{PoseidonRO, PoseidonROCircuit},
   },
-  traits::{CompressedGroup, Group, PrimeFieldExt, TranscriptReprTrait, SerializableUncompressed},
+  traits::{CompressedGroup, Group, PrimeFieldExt, TranscriptReprTrait},
 };
 use digest::{ExtendableOutput, Input};
 use ff::{FromUniformBytes, PrimeField};

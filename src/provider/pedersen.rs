@@ -3,7 +3,8 @@ use crate::{
   errors::NovaError,
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentTrait},
-    AbsorbInROTrait, CompressedGroup, Group, ROTrait, TranscriptReprTrait,
+    AbsorbInROTrait, CompressedGroup, Group, ROTrait,
+    TranscriptReprTrait,
   },
 };
 use core::{
@@ -13,83 +14,20 @@ use core::{
 };
 use ff::Field;
 use rayon::prelude::*;
-use serde::{
-  Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
+
+// #[cfg(feature = "uncompressed")]
+use serde_with::serde_as;
+
 /// A type that holds commitment generators
+// #[cfg_attr(feature = "uncompressed", serde_as)]
+#[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentKey<G: Group> {
-  #[cfg_attr(
-    feature = "uncompressed",
-    serde(
-      serialize_with = "ser_uncompressed::<G, __S>",
-      deserialize_with = "de_uncompressed::<G, __D>"
-    )
-  )]
+  // #[cfg_attr(feature = "uncompressed", serde_as(as = "Vec<crate::traits::uncompressed::SerializeUncompressed>"))]
+  #[serde_as(as = "Vec<crate::traits::uncompressed::SerializeUncompressed>")]
   ck: Vec<G::PreprocessedGroupElement>,
   _p: PhantomData<G>,
-}
-
-#[cfg(feature = "uncompressed")]
-fn ser_uncompressed<G: Group, S: serde::Serializer>(
-  this: &Vec<G::PreprocessedGroupElement>,
-  serializer: S,
-) -> Result<S::Ok, S::Error> {
-  let mut seq = serializer.serialize_seq(Some(this.len()))?;
-  for elem in this {
-    let bytes = pasta_curves::group::UncompressedEncoding::to_uncompressed(elem);
-    serde::ser::SerializeSeq::serialize_element(&mut seq, bytes.as_ref())?;
-  }
-  serde::ser::SerializeSeq::end(seq)
-}
-
-
-#[cfg(feature = "uncompressed")]
-struct ElementVisitor<G: Group> {
-  marker: PhantomData<fn() -> Vec<G::PreprocessedGroupElement>>,
-}
-
-#[cfg(feature = "uncompressed")]
-impl<G: Group> ElementVisitor<G> {
-  fn new() -> Self {
-    ElementVisitor {
-      marker: PhantomData,
-    }
-  }
-}
-
-#[cfg(feature = "uncompressed")]
-impl<'de, G: Group> serde::de::Visitor<'de> for ElementVisitor<G> {
-  // The type that our Visitor is going to produce.
-  type Value = Vec<G::PreprocessedGroupElement>;
-
-  // Format a message stating what data this Visitor expects to receive.
-  fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    formatter.write_str("a vector of PreprocessedGroupElements")
-  }
-
-  fn visit_seq<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-  where
-    M: serde::de::SeqAccess<'de>,
-  {
-    let mut vec = Vec::new();
-    while let Some(value) = access.next_element()? {
-      let elem = pasta_curves::group::UncompressedEncoding::from_uncompressed(value).unwrap();
-      vec.push(elem);
-    }
-    Ok(vec)
-  }
-}
-
-#[cfg(feature = "uncompressed")]
-fn de_uncompressed<'de, G: Group, D>(
-  deserializer: D,
-) -> Result<Vec<G::PreprocessedGroupElement>, D::Error>
-where
-  D: serde::Deserializer<'de>,
-{
-  let seq = deserializer.deserialize_seq(ElementVisitor::<G>::new())?;
-  Ok(seq)
 }
 
 /// A type that holds a commitment

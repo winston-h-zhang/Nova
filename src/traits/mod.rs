@@ -10,12 +10,13 @@ use core::{
 };
 use ff::{PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
-use pasta_curves::group::UncompressedEncoding;
 use serde::{Deserialize, Serialize};
 
 pub mod commitment;
 
 use commitment::CommitmentEngineTrait;
+
+use pasta_curves::group::UncompressedEncoding;
 
 /// Represents an element of a group
 /// This is currently tailored for an elliptic curve group
@@ -107,18 +108,6 @@ pub trait Group:
   fn get_curve_params() -> (Self::Base, Self::Base, BigInt);
 }
 
-pub trait SerializableUncompressed: UncompressedEncoding<Uncompressed = Self::T> {
-  type T: Serialize + for<'de> Deserialize<'de>;
-}
-
-impl<T> SerializableUncompressed for T
-where
-  T: UncompressedEncoding,
-  <T as UncompressedEncoding>::Uncompressed: Serialize + for<'de> Deserialize<'de>,
-{
-  type T = <Self as UncompressedEncoding>::Uncompressed;
-}
-
 /// Represents a compressed version of a group element
 pub trait CompressedGroup:
   Clone
@@ -138,6 +127,23 @@ pub trait CompressedGroup:
 
   /// Decompresses the compressed group element
   fn decompress(&self) -> Option<Self::GroupElement>;
+}
+
+/// Convenience trait for those instances of UncompressedEncoding which Uncompressed representation type are also serializable
+pub trait SerializableUncompressed: UncompressedEncoding<Uncompressed = Self::Target> {
+  /// This is intended to be the Uncompressed representation type of the base trait
+  /// to which we are adding a byte-conversion bound
+  type Target: Serialize + for<'de> Deserialize<'de>;
+}
+
+/// A blanket implementation that conveys our intended meaning: this works iff the Uncompressed representation type is
+/// convertible to bytes
+impl<T> SerializableUncompressed for T
+where
+  T: UncompressedEncoding,
+  <T as UncompressedEncoding>::Uncompressed: Serialize + for<'de> Deserialize<'de>,
+{
+  type Target = <T as UncompressedEncoding>::Uncompressed;
 }
 
 /// A helper trait to absorb different objects in RO
@@ -272,3 +278,38 @@ impl<G: Group, T: TranscriptReprTrait<G>> TranscriptReprTrait<G> for &[T] {
 pub mod circuit;
 pub mod evaluation;
 pub mod snark;
+
+/// Serializers for PreprocessedGroupElement elements that are convertible to an uncompressed representation through group::UncompressedEncoding
+///
+/// Use `#[serde(with = "uncompressed")]` at the point where the object is
+/// used inside a struct or enum definition.
+///
+// #[cfg(feature = "uncompressed")]
+pub(crate) mod uncompressed {
+  use super::*;
+  use serde::{de::Deserializer, ser::Serializer};
+  use serde_with::{DeserializeAs, SerializeAs};
+
+  pub struct SerializeUncompressed {}
+
+  impl<T: SerializableUncompressed> SerializeAs<T> for SerializeUncompressed {
+    fn serialize_as<S>(source: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: Serializer,
+    {
+      let bytes = source.to_uncompressed();
+      bytes.serialize(serializer)
+    }
+  }
+
+  impl<'de, T: SerializableUncompressed> DeserializeAs<'de, T> for SerializeUncompressed {
+    fn deserialize_as<D>(deserializer: D) -> Result<T, D::Error>
+    where
+      D: Deserializer<'de>,
+    {
+      let bytes = <<T as SerializableUncompressed>::Target>::deserialize(deserializer)?;
+      let value = <T as UncompressedEncoding>::from_uncompressed(&bytes).unwrap();
+      Ok(value)
+    }
+  }
+}
