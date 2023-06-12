@@ -1,4 +1,5 @@
 //! This module defines traits that a step function must implement
+use abomonation_derive::Abomonation;
 use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
 use core::marker::PhantomData;
 use ff::PrimeField;
@@ -24,7 +25,7 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
 }
 
 /// A trivial step circuit that simply returns the input
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default, Abomonation)]
 pub struct TrivialTestCircuit<F: PrimeField> {
   _p: PhantomData<F>,
 }
